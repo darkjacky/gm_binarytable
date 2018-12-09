@@ -1,5 +1,4 @@
 #include "GarrysMod/Lua/Interface.h"
-#include <sstream>
 
 unsigned int GetStoreSize(long long i) {
 	if (i == (signed char)(i & 0xFF))
@@ -26,7 +25,54 @@ const char TYPEANGLE = 11;
 const char TYPETABLE = 12;
 const char TYPETABLEEND = 13;
 
-void BinaryToStrLoop(GarrysMod::Lua::ILuaBase *LUA, std::stringstream &stream) {
+class QuickStrWrite {
+public:
+	QuickStrWrite() {
+		str = new char[1048576];												// Init 1 MB the lower we set this the slower it will be
+	}
+
+	~QuickStrWrite() {															// Destroy class
+		delete[] str;															// We need to delete otherwise we will create a memory leak
+		str = 0;																// unset for good measure
+	}
+
+	unsigned int GetLength() {													// To avoid messing with the length we copy it
+		return position;
+	}
+
+	void expand(unsigned int amount) {											// Looks like we ran out of space we need to increase this
+		char *replacementstr = new char[length + amount];						// Create our new char array larger than the one we had before
+		unsigned int pos = 0;													// The position we copy from
+		while (pos < position) replacementstr[pos] = str[pos++];				// Copy until pos reaches position
+		delete[] str;															// Delete our smaller char array
+		str = replacementstr;													// Replace the pointer for our array
+		length += amount;														// Increase our length
+	}
+
+	void write(char *in, unsigned int len) {
+		if (position + len > length) expand(len + 1048576);						// Looks like we wont be able to fit the new data into the array, lets expand it by 1 MB
+		unsigned int pos = 0;													// The position we copy from
+		while (len > pos) str[position++] = in[pos++];							// Copy until pos reaches position
+	}
+
+	void write(const char *in, unsigned int len) {
+		if (position + len > length) expand(len + 1048576);						// Looks like we wont be able to fit the new data into the array, lets expand it by 1 MB
+		unsigned int pos = 0;													// The position we copy from
+		while (len > pos) str[position++] = in[pos++];							// Copy until pos reaches position
+	}
+
+	char *GetStr() {
+		return str;																// Return pointer of string
+	}
+
+private:
+	unsigned int position = 0;													// Position we are currently at
+	unsigned int length = 0;													// String length
+	char *str = 0;																// String pointer
+};
+
+int ToStringFN = 0;
+void BinaryToStrLoop(GarrysMod::Lua::ILuaBase *LUA, QuickStrWrite &stream) {
 	LUA->PushNil();																// Push nil for Next, This will be our key variable
 	while (LUA->Next(-2)) {														// Get Next variable
 		for (int it = 2; it > 0; it--) {	
@@ -99,7 +145,7 @@ void BinaryToStrLoop(GarrysMod::Lua::ILuaBase *LUA, std::stringstream &stream) {
 					stream.write((char *)&vec, sizeof(vec));					// Write Vector.x to stream
 					break;
 				}
-			case ( GarrysMod::Lua::Type::ANGLE): {
+			case (GarrysMod::Lua::Type::ANGLE): {
 					QAngle vec = LUA->GetAngle(-it);							// Get Angle from Lua
 					stream.write((char *)&TYPEANGLE, sizeof(char));				// Write type to stream
 					stream.write((char *)&vec, sizeof(vec));					// Write Angle to stream
@@ -113,6 +159,32 @@ void BinaryToStrLoop(GarrysMod::Lua::ILuaBase *LUA, std::stringstream &stream) {
 					LUA->Pop();													// Pop table so we can continue with Next()
 					break;
 				}
+			default: {
+				// We do not know this type so we will use build in functions to convert it into a string
+				LUA->ReferencePush(ToStringFN);									// Push reference function tostring
+				LUA->Push(-it - 1);												// Push data we want to have the string for
+				LUA->Call(1, 1);												// Call function with 1 variable and 1 return
+
+				unsigned int len = 0;											// Assign a length variable
+				const char * in = LUA->GetString(-it, &len);					// Get string and length
+				if (len < 0xFF) {
+					stream.write((char *)&TYPESTRINGCHAR, sizeof(char));		// Write type to stream
+					unsigned char convlen = len;
+					stream.write((char *)&convlen, sizeof(unsigned char));		// Write string length
+				}
+				else if (len < 0xFFFF) {
+					stream.write((char *)&TYPESTRINGSHORT, sizeof(char));		// Write type to stream
+					unsigned short convlen = len;
+					stream.write((char *)&convlen, sizeof(unsigned short));		// Write string length
+				}
+				else {
+					stream.write((char *)&TYPESTRINGLONG, sizeof(char));		// Write type to stream
+					stream.write((char *)&len, sizeof(unsigned int));			// Write string length
+				}
+				stream.write(in, len);											// Write string to stream
+				LUA->Pop();														// Pop string
+				break;
+			}
 			}
 		}
 		LUA->Pop();																// Pop value from stack
@@ -120,23 +192,46 @@ void BinaryToStrLoop(GarrysMod::Lua::ILuaBase *LUA, std::stringstream &stream) {
 }
 
 LUA_FUNCTION(TableToBinary) {
-	LUA->CheckType(1, GarrysMod::Lua::Type::TABLE);					// Check if our input is a table
-	LUA->Push(1);													// Push table to -1
-	std::stringstream stream;										// stringstream for writing to binary
-	BinaryToStrLoop(LUA, stream);									// Compute table into string
-	LUA->Pop();														// Pop array away
-	auto str = stream.str();										// Get std::string
-	LUA->PushString(str.c_str(), str.length());						// Push as return value
-    return 1;														// return 1 variable to Lua
+	LUA->CheckType(1, GarrysMod::Lua::Type::TABLE);								// Check if our input is a table
+	LUA->Push(1);																// Push table to -1
+	QuickStrWrite stream;														// Custom stringstream replacement for this specific thing
+	BinaryToStrLoop(LUA, stream);												// Compute table into string
+	LUA->Pop();																	// Pop array away
+	LUA->PushString(stream.GetStr(), stream.GetLength());						// Get string and length of string then push as return value
+    return 1;																	// return 1 variable to Lua
 }
 
-void BinaryToTableLoop(GarrysMod::Lua::ILuaBase *LUA, std::stringstream &stream) {
-	while (stream) {												// Loop as long as we have something in our stream or until we reach our endpos
+class QuickStrRead {
+public:
+	QuickStrRead(const char * in, unsigned int len) {
+		str = in;																// Copy string pointer
+		length = len;															// Copy length
+	}
+
+	void read(char *to, unsigned int len) {
+		unsigned int pos = 0;
+		if (len + position > length) return;									// Should not happen but if it did, this prevents crashing
+		while (len > pos)
+			to[pos++] = str[position++];										// Copy from string to buffer until we reach length
+	}
+
+	bool atend() {																// Check if we are at the end of string
+		return position == length;
+	}
+
+private:
+	unsigned int position = 0;													// Position we are reading the string from
+	unsigned int length = 0;													// Length of string
+	const char *str = 0;														// String pointer
+};
+
+void BinaryToTableLoop(GarrysMod::Lua::ILuaBase *LUA, QuickStrRead &stream) {
+	while (!stream.atend()) {										// Loop as long as we have something in our stream or until we reach our endpos
 		char top = LUA->Top();										// Store Top variable to check if we added something to our stack at the end
 		for (int i = 0; i < 2; i++) {								// Loop twice for key and variable
 			char type = 0;											// Create type variable
 			stream.read((char *)&type, sizeof(char));				// Read type variable from stream
-			if (type == 0) return;									// Should not happen, does happen because stringstream goes to -1
+			if (type == 0) return;									// Should not happen
 
 			switch (type) {
 			case (TYPETABLEEND): {
@@ -236,11 +331,9 @@ void BinaryToTableLoop(GarrysMod::Lua::ILuaBase *LUA, std::stringstream &stream)
 
 LUA_FUNCTION(BinaryToTable) {
 	LUA->CheckString(1);
-	std::stringstream stream;										// Create stream
 	size_t outlen = 0;												// This will be our string length
 	auto str = LUA->GetString(1, &outlen);							// Get string and string length from Lua
-	stream.write(str, outlen);										// Write string into stream
-	stream.seekg(0, std::ios::beg);									// Start from begining of stream
+	QuickStrRead stream(str, outlen);								// Push string to custom read class
 	LUA->CreateTable();												// Create Table that will be pushed to Lua when we are done
 	BinaryToTableLoop(LUA, stream);									// Turn our string into actual variables
 	return 1;														// return 1 variable to Lua
@@ -254,11 +347,14 @@ GMOD_MODULE_OPEN() {
 	LUA->PushString("BinaryToTable");								// Push name of function
 	LUA->PushCFunction(BinaryToTable);								// Push function
 	LUA->SetTable(-3);												// Set variables to _G
+	LUA->GetField(-1, "tostring");									// Get function tostring
+	ToStringFN = LUA->ReferenceCreate();							// Create reference to function tostring
 	LUA->Pop();														// Pop _G
-    return 0;
+	return 0;
 }
 
 
 GMOD_MODULE_CLOSE() {
-    return 0;
+	LUA->ReferenceFree(ToStringFN);
+	return 0;
 }
