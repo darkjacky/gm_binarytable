@@ -5,9 +5,9 @@ This module takes a Lua table and turns it into binary.
 Number are stored lossless from the engine.
 
 Output from the test.lua:
-TableToBinary is roughly 11X faster than util.TableToJSON
+TableToBinary is roughly 13X faster than util.TableToJSON
 
-BinaryToTable is roughlt 6X faster than util.JSONToTable
+BinaryToTable is roughly 13X faster than util.JSONToTable
 
 To compile download https://github.com/Facepunch/gmod-module-base/tree/development and premake5 https://premake.github.io/
 Put the include folder from gmod-module-base in the folder above gm_binarytable, put premake5.exe in the gm_binarytable folder and run BuildProjects.bat.
