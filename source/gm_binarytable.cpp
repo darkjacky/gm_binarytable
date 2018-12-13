@@ -25,6 +25,7 @@ const char TYPEVECTOR = 10;
 const char TYPEANGLE = 11;
 const char TYPETABLE = 12;
 const char TYPETABLEEND = 13;
+const char TYPETABLESEQ = 14;
 
 class QuickStrWrite {
 public:
@@ -180,8 +181,121 @@ void BinaryToStrLoop(GarrysMod::Lua::ILuaBase *LUA, QuickStrWrite &stream) {
 	}
 }
 
+void BinaryToStrLoopSeq(GarrysMod::Lua::ILuaBase *LUA, QuickStrWrite &stream) {
+	LUA->PushNil();																				// Push nil for Next, This will be our key variable
+	while (LUA->Next(-2)) {																		// Get Next variable
+			int type = LUA->GetType(-1);														// Loop 2 then 1. Variable 1 is the key, variable 2 is value.
+			switch (type) {
+			case (GarrysMod::Lua::Type::BOOL): {
+				if (LUA->GetBool(-1)) {															// Check if bool is true or false and write it so we don't have to write 2 byes
+					stream.writetype(BOOLTRUE);													// Write true to stream
+				}
+				else {
+					stream.writetype(BOOLFALSE);												// Write true to stream
+				}
+				break;
+			}
+			case (GarrysMod::Lua::Type::NUMBER): {
+				double in = LUA->GetNumber(-1);													// Get number
+				if ((in - (long long)in) == 0) {												// Check if number is an integer
+					auto size = GetStoreSize(in);												// Get minimum bytes required to store number
+					switch (size) {
+					case (sizeof(signed char)): {												// Can be stored as char
+						char out = in;															// Turn our variable into a char
+						stream.write(TYPECHAR, &out, sizeof(signed char));						// Write number to stream
+						break;
+					}
+					case (sizeof(short)): {														// Can be stored as short
+						short out = in;																// Turn our variable into a short
+						stream.write(TYPESHORT, &out, sizeof(short));								// Write number to stream
+						break;
+					}
+					case (sizeof(int)): {															// Can be stored as int
+						int out = in;																// Turn our variable into a int
+						stream.write(TYPEINT, &out, sizeof(int));									// Write number to stream
+						break;
+					}
+					default:
+						stream.write(TYPENUMBER, &in, sizeof(double));								// Write number to stream
+						break;
+					}
+				}
+				else {																				// Number is not an integer
+					stream.write(TYPENUMBER, &in, sizeof(double));									// Write number to stream 
+				}
+				break;
+			}
+			case (GarrysMod::Lua::Type::STRING): {
+				size_t len = 0;																		// Assign a length variable
+				const char * in = LUA->GetString(-1, &len);											// Get string and length
+				if (len < 0xFF) {
+					stream.write(TYPESTRINGCHAR, &len, sizeof(unsigned char));						// Write string length
+				}
+				else if (len < 0xFFFF) {
+					stream.write(TYPESTRINGSHORT, &len, sizeof(unsigned short));					// Write string length
+				}
+				else {
+					stream.write(TYPESTRINGLONG, &len, sizeof(unsigned int));						// Write string length
+				}
+				stream.write(in, len);																// Write string to stream
+				break;
+			}
+			case (GarrysMod::Lua::Type::VECTOR): {
+				stream.write(TYPEVECTOR, &LUA->GetVector(-1), sizeof(Vector));						// Write Vector to stream
+				break;
+			}
+			case (GarrysMod::Lua::Type::ANGLE): {
+				stream.write(TYPEANGLE, &LUA->GetAngle(-1), sizeof(QAngle));						// Write Angle to stream
+				break;
+			}
+			case (GarrysMod::Lua::Type::TABLE): {
+				LUA->Push(-1);																		// Push table to -1
+				stream.writetype(TYPETABLE);														// Write table start to stream
+				BinaryToStrLoopSeq(LUA, stream);													// Start this function to extract everything from the table
+				stream.writetype(TYPETABLEEND);														// Write table end to stream
+				LUA->Pop();																			// Pop table so we can continue with Next()
+				break;
+			}
+			default: {
+				// We do not know this type so we will use build in functions to convert it into a string
+				LUA->ReferencePush(ToStringFN);														// Push reference function tostring
+				LUA->Push(-1 - 1);																	// Push data we want to have the string for
+				LUA->Call(1, 1);																	// Call function with 1 variable and 1 return
+
+				size_t len = 0;																		// Assign a length variable
+				const char * in = LUA->GetString(-1, &len);											// Get string and length
+				if (len < 0xFF) {
+					unsigned char convlen = len;
+					stream.write(TYPESTRINGCHAR, &len, sizeof(unsigned char));						// Write string length
+				}
+				else if (len < 0xFFFF) {
+					stream.write(TYPESTRINGSHORT, &len, sizeof(unsigned short));					// Write string length
+				}
+				else {
+					stream.write(TYPESTRINGLONG, &len, sizeof(unsigned int));						// Write string length
+				}
+				stream.write(in, len);																// Write string to stream
+				LUA->Pop();																			// Pop string
+				break;
+			}
+			}
+		LUA->Pop();																					// Pop value from stack
+	}
+}
+
 LUA_FUNCTION(TableToBinary) {
 	LUA->CheckType(1, GarrysMod::Lua::Type::TABLE);												// Check if our input is a table
+	if (LUA->GetType(2) == GarrysMod::Lua::Type::BOOL) {										// Check if we have a second variable
+		if (LUA->GetBool(2)) {																	// If this is true we assume the table is sequential
+			LUA->Push(1);																		// Push table to -1
+			QuickStrWrite stream;																// Custom stringstream replacement for this specific thing
+			stream.writetype(TYPETABLESEQ);														// Write Sequential table indicator
+			BinaryToStrLoopSeq(LUA, stream);													// Compute table into string
+			LUA->Pop();																			// Pop table
+			LUA->PushString(stream.GetStr(), stream.GetLength());								// Get string and length of string then push as return value
+			return 1;
+		}
+	}
 	LUA->Push(1);																				// Push table to -1
 	QuickStrWrite stream;																		// Custom stringstream replacement for this specific thing
 	BinaryToStrLoop(LUA, stream);																// Compute table into string
@@ -332,13 +446,117 @@ void BinaryToTableLoop(GarrysMod::Lua::ILuaBase *LUA, QuickStrRead &stream) {
 	}
 }
 
+void BinaryToTableLoopSeq(GarrysMod::Lua::ILuaBase *LUA, QuickStrRead &stream) {
+	unsigned int position = 1;										// Lua starts with a table index of 1
+	char top = LUA->Top();											// Store Top variable to check if we added something to our stack at the end
+	while (!stream.atend()) {										// Loop as long as we have something in our stream or until we reach our endpos
+		LUA->PushNumber(position++);								// Push index and increase its value
+		switch (stream.GetType()) {									// Get type and run corresponding code
+		case (0): {
+			LUA->Pop();												// Pop number we just pushed
+			return;													// This should not happen
+		}
+		case (TYPETABLEEND): {
+			LUA->Pop();												// Pop number we just pushed
+			return;													// We are at the end of our table there is nothing left
+		}
+		case (BOOLTRUE): {
+			LUA->PushBool(true);									// Push true to Lua
+			break;
+		}
+		case (BOOLFALSE): {
+			LUA->PushBool(false);									// Push false to Lua
+			break;
+		}
+		case (TYPECHAR): {
+			signed char out = 0;									// Create variable
+			stream.read(&out, sizeof(char));						// Read variable from stream
+			LUA->PushNumber(out);									// Push variable to Lua
+			break;
+		}
+		case (TYPESHORT): {
+			short out = 0;											// Create variable
+			stream.read(&out, sizeof(short));						// Read variable from stream
+			LUA->PushNumber(out);									// Push variable to Lua
+			break;
+		}
+		case (TYPEINT): {
+			int out = 0;											// Create variable
+			stream.read(&out, sizeof(int));							// Read variable from stream
+			LUA->PushNumber(out);									// Push variable to Lua
+			break;
+		}
+		case (TYPENUMBER): {
+			double out = 0;											// Create variable
+			stream.read(&out, sizeof(double));						// Read variable from stream
+			LUA->PushNumber(out);									// Push variable to Lua
+			break;
+		}
+		case (TYPESTRINGCHAR): {
+			size_t len = 0;											// Create length variable
+			char *str;												// Create pointer
+			stream.ReadString(len, str, sizeof(unsigned char));		// Push len, pointer, header length
+			LUA->PushString(str, len);								// Push string to Lua with length
+			break;
+		}
+		case (TYPESTRINGSHORT): {
+			size_t len = 0;											// Create length variable
+			char *str;												// Create pointer
+			stream.ReadString(len, str, sizeof(unsigned short));	// Push len, pointer, header length
+			LUA->PushString(str, len);								// Push string to Lua with length
+			break;
+		}
+		case (TYPESTRINGLONG): {
+			size_t len = 0;											// Create length variable
+			char *str;												// Create pointer
+			stream.ReadString(len, str, sizeof(size_t));			// Push len, pointer, header length
+			LUA->PushString(str, len);								// Push string to Lua with length
+			break;
+		}
+		case (TYPEVECTOR): {
+			Vector vec;												// Create Vector variable
+			stream.read(&vec, sizeof(Vector));						// Copy Vector from stream
+			LUA->PushVector(vec);									// Push Vector to Lua
+			break;
+		}
+		case (TYPEANGLE): {
+			QAngle ang;												// Create Angle variable
+			stream.read(&ang, sizeof(QAngle));						// Copy Angle from stream
+			LUA->PushAngle(ang);									// Push Angle to Lua
+			break;
+		}
+		case (TYPETABLE): {
+			LUA->CreateTable();										// Create table
+			BinaryToTableLoopSeq(LUA, stream);						// Call this function
+			break;
+		}
+		default:													// should never happen
+			break;
+		}
+
+		if (top + 2 == LUA->Top())
+			LUA->RawSet(-3);										// Push new variable to table
+		else if (LUA->Top() > top)
+			LUA->Pop(LUA->Top() - top);								// Try to pop as much variables off stack as are probably broken this should never be run but lets be prepared for everything
+	}
+}
+
 LUA_FUNCTION(BinaryToTable) {
 	LUA->CheckType(1, GarrysMod::Lua::Type::STRING);				// Check type is string
 	size_t len = 0;													// This will be our string length
 	const char * str = LUA->GetString(1, &len);						// Get string and string length from Lua
+	if (str[0] < 0 || str[0] > 15) {								// We cant process this
+		LUA->ThrowError("Invalid input");							// Throw an error
+		return 0;													// Return nothing
+	}
 	QuickStrRead stream(str, len);									// Push string to custom read class
 	LUA->CreateTable();												// Create Table that will be pushed to Lua when we are done
-	BinaryToTableLoop(LUA, stream);									// Turn our string into actual variables
+	if (str[0] == TYPETABLESEQ) {									// Sequential table
+		stream.GetType();											// Type is sequential so we need to remove the first char
+		BinaryToTableLoopSeq(LUA, stream);							// Turn our string into actual variables
+	} else {
+		BinaryToTableLoop(LUA, stream);								// Turn our string into actual variables
+	}
 	return 1;														// return 1 variable to Lua
 }
 

@@ -4,10 +4,13 @@ Another way to store a table to a file
 This module takes a Lua table and turns it into binary.
 Number are stored lossless from the engine.
 
-Output from the test.lua:
-TableToBinary is roughly 13X faster than util.TableToJSON
+With version 1.03 there is a secondary arg if you pass true it will read the table as sequential (EVEN WHEN IT IS NOT) and write variables without the key. If you have a sequential table the output will be correct, if you don't have a sequential table the output will be sequential but it will not match your input.
 
-BinaryToTable is roughly 13X faster than util.JSONToTable
+Output from the test.lua:
+TableToBinary(tab) is roughly 16X faster than util.TableToJSON
+TableToBinary(tab, true) is roughly 23X faster than util.TableToJSON
+
+BinaryToTable is roughly 10X faster than util.JSONToTable
 
 To compile download https://github.com/Facepunch/gmod-module-base/tree/development and premake5 https://premake.github.io/
 Put the include folder from gmod-module-base in the folder above gm_binarytable, put premake5.exe in the gm_binarytable folder and run BuildProjects.bat.
