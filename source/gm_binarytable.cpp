@@ -38,11 +38,11 @@ public:
 		str = 0;																				// unset for good measure
 	}
 
-	size_t GetLength() {																		// To avoid messing with the length we copy it
+	unsigned int GetLength() {																		// To avoid messing with the length we copy it
 		return position;
 	}
 
-	void expand(size_t amount) {
+	void expand(unsigned int amount) {
 		length += amount;																		// Increase our length
 		char *replacementstr = new char[length];												// Create our new char array larger than the one we had before
 		memcpy(replacementstr, str, position);													// memcpy array
@@ -56,14 +56,14 @@ public:
 	}
 
 	template<class T>
-	void write(const unsigned char &type, T *in, size_t len) {
+	void write(const unsigned char &type, T *in, unsigned int len) {
 		if (position + len > length) expand(len + 1048576);										// Looks like we wont be able to fit the new data into the array, lets expand it by 1 MB
 		str[position++] = type;																	// Write type at position
 		memcpy(str + position, in, len);														// Copy memory into char array
 		position += len;																		// Update position
 	}
 
-	void write(const char *in, size_t len) {
+	void write(const char *in, unsigned int len) {
 		if (position + len > length) expand(len + 1048576);										// Looks like we wont be able to fit the new data into the array, lets expand it by 1 MB
 		memcpy(str + position, in, len);														// Copy memory into char array
 		position += len;																		// Update position
@@ -74,8 +74,8 @@ public:
 	}
 
 private:
-	size_t position = 0;																		// Position we are currently at
-	size_t length = 0;																			// String length
+	unsigned int position = 0;																		// Position we are currently at
+	unsigned int length = 0;																			// String length
 	char *str = 0;																				// String pointer
 };
 
@@ -125,7 +125,7 @@ void BinaryToStrLoop(GarrysMod::Lua::ILuaBase *LUA, QuickStrWrite &stream) {
 					break;
 				}
 			case (GarrysMod::Lua::Type::STRING): {
-					size_t len = 0;																// Assign a length variable
+					unsigned int len = 0;														// Assign a length variable
 					const char * in = LUA->GetString(-it, &len);								// Get string and length
 					if (len < 0xFF) {
 						stream.write(TYPESTRINGCHAR, &len, sizeof(unsigned char));				// Write string length
@@ -159,7 +159,7 @@ void BinaryToStrLoop(GarrysMod::Lua::ILuaBase *LUA, QuickStrWrite &stream) {
 				LUA->Push(-it - 1);																// Push data we want to have the string for
 				LUA->Call(1, 1);																// Call function with 1 variable and 1 return
 
-				size_t len = 0;																	// Assign a length variable
+				unsigned int len = 0;																	// Assign a length variable
 				const char * in = LUA->GetString(-it, &len);									// Get string and length
 				if (len < 0xFF) {
 					unsigned char convlen = len;
@@ -226,7 +226,7 @@ void BinaryToStrLoopSeq(GarrysMod::Lua::ILuaBase *LUA, QuickStrWrite &stream) {
 				break;
 			}
 			case (GarrysMod::Lua::Type::STRING): {
-				size_t len = 0;																		// Assign a length variable
+				unsigned int len = 0;																		// Assign a length variable
 				const char * in = LUA->GetString(-1, &len);											// Get string and length
 				if (len < 0xFF) {
 					stream.write(TYPESTRINGCHAR, &len, sizeof(unsigned char));						// Write string length
@@ -262,7 +262,7 @@ void BinaryToStrLoopSeq(GarrysMod::Lua::ILuaBase *LUA, QuickStrWrite &stream) {
 				LUA->Push(-1 - 1);																	// Push data we want to have the string for
 				LUA->Call(1, 1);																	// Call function with 1 variable and 1 return
 
-				size_t len = 0;																		// Assign a length variable
+				unsigned int len = 0;																		// Assign a length variable
 				const char * in = LUA->GetString(-1, &len);											// Get string and length
 				if (len < 0xFF) {
 					unsigned char convlen = len;
@@ -306,7 +306,7 @@ LUA_FUNCTION(TableToBinary) {
 
 class QuickStrRead {
 public:
-	QuickStrRead(const char * in, size_t &len) {
+	QuickStrRead(const char * in, unsigned int &len) {
 		str = in;													// Copy string pointer
 		length = len;												// Copy length
 	}
@@ -321,13 +321,13 @@ public:
 	}
 
 	template<class T>
-	void read(T *to, size_t len) {
+	void read(T *to, unsigned int len) {
 		if (len + position > length) return;						// Should not happen but if it did, this prevents crashing
 		memcpy(to, str + position, len);							// Copy from string to buffer until we reach length
 		position += len;
 	}
 
-	void ReadString(size_t &len, char * &outstr, size_t readsize) {
+	void ReadString(unsigned int &len, char * &outstr, unsigned int readsize) {
 		read(&len, readsize);
 		if (Tstrlen > 0 && Tstrlen < len) {							// Can not reuse buffer, it is too small
 			delete[] Tstr;											// Delete old char array
@@ -346,11 +346,11 @@ public:
 	}
 
 private:
-	size_t position = 0;											// Position we are reading the string from
-	size_t length = 0;												// Length of string
+	unsigned int position = 0;										// Position we are reading the string from
+	unsigned int length = 0;										// Length of string
 	const char *str = 0;											// String pointer
 	char *Tstr = 0;													// Temporary storage char array
-	size_t Tstrlen = 0;												// Length of temporary char array
+	unsigned int Tstrlen = 0;										// Length of temporary char array
 };
 
 void BinaryToTableLoop(GarrysMod::Lua::ILuaBase *LUA, QuickStrRead &stream) {
@@ -397,23 +397,23 @@ void BinaryToTableLoop(GarrysMod::Lua::ILuaBase *LUA, QuickStrRead &stream) {
 				break;
 			}
 			case (TYPESTRINGCHAR): {
-				size_t len = 0;										// Create length variable
+				unsigned int len = 0;								// Create length variable
 				char *str;											// Create pointer
 				stream.ReadString(len, str, sizeof(unsigned char));	// Push len, pointer, header length
 				LUA->PushString(str, len);							// Push string to Lua with length
 				break;
 			}
 			case (TYPESTRINGSHORT): {
-				size_t len = 0;										// Create length variable
+				unsigned int len = 0;								// Create length variable
 				char *str;											// Create pointer
 				stream.ReadString(len, str, sizeof(unsigned short));// Push len, pointer, header length
 				LUA->PushString(str, len);							// Push string to Lua with length
 				break;
 			}
 			case (TYPESTRINGLONG): {
-				size_t len = 0;										// Create length variable
+				unsigned int len = 0;								// Create length variable
 				char *str;											// Create pointer
-				stream.ReadString(len, str, sizeof(size_t));		// Push len, pointer, header length
+				stream.ReadString(len, str, sizeof(unsigned int));		// Push len, pointer, header length
 				LUA->PushString(str, len);							// Push string to Lua with length
 				break;
 			}
@@ -493,23 +493,23 @@ void BinaryToTableLoopSeq(GarrysMod::Lua::ILuaBase *LUA, QuickStrRead &stream) {
 			break;
 		}
 		case (TYPESTRINGCHAR): {
-			size_t len = 0;											// Create length variable
+			unsigned int len = 0;											// Create length variable
 			char *str;												// Create pointer
 			stream.ReadString(len, str, sizeof(unsigned char));		// Push len, pointer, header length
 			LUA->PushString(str, len);								// Push string to Lua with length
 			break;
 		}
 		case (TYPESTRINGSHORT): {
-			size_t len = 0;											// Create length variable
+			unsigned int len = 0;											// Create length variable
 			char *str;												// Create pointer
 			stream.ReadString(len, str, sizeof(unsigned short));	// Push len, pointer, header length
 			LUA->PushString(str, len);								// Push string to Lua with length
 			break;
 		}
 		case (TYPESTRINGLONG): {
-			size_t len = 0;											// Create length variable
+			unsigned int len = 0;											// Create length variable
 			char *str;												// Create pointer
-			stream.ReadString(len, str, sizeof(size_t));			// Push len, pointer, header length
+			stream.ReadString(len, str, sizeof(unsigned int));			// Push len, pointer, header length
 			LUA->PushString(str, len);								// Push string to Lua with length
 			break;
 		}
@@ -543,7 +543,7 @@ void BinaryToTableLoopSeq(GarrysMod::Lua::ILuaBase *LUA, QuickStrRead &stream) {
 
 LUA_FUNCTION(BinaryToTable) {
 	LUA->CheckType(1, GarrysMod::Lua::Type::STRING);				// Check type is string
-	size_t len = 0;													// This will be our string length
+	unsigned int len = 0;													// This will be our string length
 	const char * str = LUA->GetString(1, &len);						// Get string and string length from Lua
 	if (str[0] < 0 || str[0] > 15) {								// We cant process this
 		LUA->ThrowError("Invalid input");							// Throw an error
