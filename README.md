@@ -6,7 +6,7 @@ Number are stored lossless from the engine.
 
 With version 1.03 there is a secondary arg if you pass true it will read the table as sequential (EVEN WHEN IT IS NOT) and write variables without the key. If you have a sequential table the output will be correct, if you don't have a sequential table the output will be sequential but it will not match your input.
 
-Verion 1.04 adds a CRC check which is enabled by default. You can turn it off with BinaryToTable(tab, false) and TableToBinary(tab, nil, false).
+Verion 1.06 adds a CRC check which is enabled by default. You can turn it off with BinaryToTable(tab, false) and TableToBinary(tab, nil, false).
 
 Output from the test.lua:
 ```
