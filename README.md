@@ -6,51 +6,25 @@ Number are stored lossless from the engine.
 
 With version 1.03 there is a secondary arg if you pass true it will read the table as sequential (EVEN WHEN IT IS NOT) and write variables without the key. If you have a sequential table the output will be correct, if you don't have a sequential table the output will be sequential but it will not match your input.
 
+Verion 1.04 adds a CRC check which is enabled by default. You can turn it off with BinaryToTable(tab, false) and TableToBinary(tab, nil, false).
+
 Output from the test.lua:
 ```
-Ryzen 9 3900x 64 bit
-It took util.TableToJSON an average of  0.091015573333334
-It took util.JSONToTable an average of  0.076666526666666
-It took TableToBinary an average of     0.0040803233333335
-It took BinaryToTable an average of     0.0067394266666668
-TableToBinary is 22.31 faster than util.TableToJSON
-BinaryToTable is 7.09 faster than util.JSONToTable
-TableToBinary produced an output of     859873
-util.TableToJSON produced an output of  1060010
-
-Ryzen 9 3900x 32 bit
-It took util.TableToJSON an average of  0.096380183333333
-It took util.JSONToTable an average of  0.078502193333333
-It took TableToBinary an average of     0.0054306633333333
-It took BinaryToTable an average of     0.00623564
-TableToBinary is 17.75 faster than util.TableToJSON
-BinaryToTable is 6.73 faster than util.JSONToTable
-TableToBinary produced an output of     859873
-util.TableToJSON produced an output of  1059975
-
-Intel i7 3770k 64 bit
-It took util.TableToJSON an average of  0.10309486666667
-It took util.JSONToTable an average of  0.085004993333333
-It took TableToBinary an average of     0.0045930166666666
-It took BinaryToTable an average of     0.0070141933333333
-TableToBinary is 22.45 faster than util.TableToJSON
-BinaryToTable is 7.32 faster than util.JSONToTable
-TableToBinary produced an output of     859873
-util.TableToJSON produced an output of  1060043
-
-Intel i7 3770k 32 bit
-It took util.TableToJSON an average of  0.10758651
-It took util.JSONToTable an average of  0.086499176666667
-It took TableToBinary an average of     0.0057781733333333
-It took BinaryToTable an average of     0.0077053466666667
-TableToBinary is 18.62 faster than util.TableToJSON
-BinaryToTable is 6.42 faster than util.JSONToTable
-TableToBinary produced an output of     859873
-util.TableToJSON produced an output of  1060030
+Results with Ryzen 9 5950x on 32bit srcds
+It took util.TableToJSON an average of  0.07506406
+It took util.JSONToTable an average of  0.0618646
+It took TableToBinary an average of     0.00370396
+It took BinaryToTable an average of     0.0042007699999999
+TableToBinary is 20.27 faster than util.TableToJSON
+BinaryToTable is 14.73 faster than util.JSONToTable
+TableToBinary with CRC is 14.09 faster than util.TableToJSON
+BinaryToTable with CRC is 8.53 faster than util.JSONToTable
+TableToBinary produced an output of     859878
+util.TableToJSON produced an output of  1060414
 ```
 
 
-BinaryToTable is roughly 7X faster than util.JSONToTable
+BinaryToTable is roughly 8X faster than util.JSONToTable
 
 To compile, download https://github.com/Facepunch/gmod-module-base/tree/development and premake5 https://premake.github.io/
 Put the include folder from gmod-module-base in the folder above gm_binarytable, put premake5.exe in the gm_binarytable folder and run BuildProjects.bat.
