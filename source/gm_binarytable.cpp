@@ -49,17 +49,23 @@ public:
 
 	void WriteCRC() {
 		uint32_t crc = crc32::update( global::table, 0, str, position );			// Calculate the current CRC
-		unsigned int newlen = position + sizeof( char ) + sizeof( uint32_t ) + 1;
-		char* replacementstr = new char[ newlen ]; 									// We will end it here so make it fit instead of making it big
-		replacementstr[ 0 ] = TYPECRC;
-
-		memcpy( replacementstr + sizeof( char ), &crc, sizeof( uint32_t ) );		// Copy CRC to string
-		memcpy( replacementstr + sizeof( char ) + sizeof( uint32_t ), str, position );// Copy old string to new string
-
-		delete[] str;
-		position += sizeof( char ) + sizeof( uint32_t );
-		length = newlen;
-		str = replacementstr;
+		auto inc = sizeof( char ) + sizeof( uint32_t );
+		if ( position + inc > length ) {
+			unsigned int newlen = position + inc;
+			char* replacementstr = new char[ newlen ]; 								// We will end it here so make it fit instead of making it big
+			replacementstr[ 0 ] = TYPECRC;
+			memmove( replacementstr + sizeof( char ), &crc, sizeof( uint32_t ) );	// Copy CRC to string
+			memmove( replacementstr + inc, str, position );							// Copy old string to new string
+			position += inc;
+			delete[] str;
+			length = newlen;
+			str = replacementstr;
+		} else { // The data will fit so we just move the data and add new to the front
+			memmove( str + inc, str, position ); // Move data to the right by 'inc'
+			str[ 0 ] = TYPECRC;
+			memmove( str + sizeof( char ), &crc, sizeof( uint32_t ) ); // Copy CRC to string
+			position += inc;
+		}
 	}
 
 	unsigned int GetLength() {										// To avoid messing with the length we copy it
@@ -69,7 +75,7 @@ public:
 	void expand( unsigned int amount ) {
 		length += amount;											// Increase our length
 		char* replacementstr = new char[ length ];					// Create our new char array larger than the one we had before
-		memcpy( replacementstr, str, position );					// memcpy array
+		memmove( replacementstr, str, position );					// memmove array
 		delete[] str;												// Delete our smaller char array
 		str = replacementstr;										// Replace the pointer for our array
 	}
@@ -83,13 +89,13 @@ public:
 	void write( const unsigned char& type, T* in, unsigned int len ) {
 		if ( position + len > length ) expand( len + 1048576 );		// Looks like we wont be able to fit the new data into the array, lets expand it by 1 MB
 		str[ position++ ] = type;									// Write type at position
-		memcpy( str + position, in, len );							// Copy memory into char array
+		memmove( str + position, in, len );							// Copy memory into char array
 		position += len;											// Update position
 	}
 
 	void write( const char* in, unsigned int len ) {
 		if ( position + len > length ) expand( len + 1048576 );		// Looks like we wont be able to fit the new data into the array, lets expand it by 1 MB
-		memcpy( str + position, in, len );							// Copy memory into char array
+		memmove( str + position, in, len );							// Copy memory into char array
 		position += len;											// Update position
 	}
 
@@ -360,13 +366,13 @@ public:
 	}
 
 	unsigned char GetType() {
-		return str[ position++ ];												// probably faster than calling memcpy
+		return str[ position++ ];												// probably faster than calling memmove
 	}
 
 	template<class T>
 	void read( T* to, unsigned int len ) {
 		if ( len + position > length ) return;									// Should not happen but if it did, this prevents crashing
-		memcpy( to, str + position, len );										// Copy from string to buffer until we reach length
+		memmove( to, str + position, len );										// Copy from string to buffer until we reach length
 		position += len;
 	}
 
@@ -623,7 +629,7 @@ LUA_FUNCTION( BinaryToTable ) {
 	if ( str[ 0 ] == TYPECRC ) {							// check CRC
 		if ( CheckCRC ) {
 			uint32_t knownCRC = 0;
-			memcpy( &knownCRC, str + sizeof( char ), sizeof( uint32_t ) );
+			memmove( &knownCRC, str + sizeof( char ), sizeof( uint32_t ) );
 			// We need to calculate the CRC from an offset
 			auto offset = sizeof( char ) + sizeof( uint32_t );
 			uint32_t crc = crc32::update( global::table, 0, str + offset, len - offset );
