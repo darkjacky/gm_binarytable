@@ -360,34 +360,22 @@ public:
 		length = len;															// Copy length
 	}
 
-	~QuickStrRead() {
-		if ( Tstr )
-			delete[] Tstr;														// Delete the buffer we created
-	}
-
 	unsigned char GetType() {
 		return str[ position++ ];												// probably faster than calling memmove
 	}
 
 	template<class T>
-	void read( T* to, unsigned int len ) {
-		if ( len + position > length ) return;									// Should not happen but if it did, this prevents crashing
-		memmove( to, str + position, len );										// Copy from string to buffer until we reach length
-		position += len;
+	void read( T &to ) {
+		if ( sizeof( T ) + position > length ) return;							// Should not happen but if it did, this prevents crashing
+		//memmove( to, str + position, len );									// Copy from string to buffer until we reach length
+		to = *(T*)(str + position);												// Make a fake copy by setting it to an offset of the pointer of our input
+		position += sizeof(T);													// Offset pointer
 	}
 
-	void ReadString( unsigned int& len, char*& outstr, unsigned int readsize ) {
-		read( &len, readsize );
-		if ( Tstrlen > 0 && Tstrlen < len ) {									// Can not reuse buffer, it is too small
-			delete[] Tstr;														// Delete old char array
-			Tstr = 0;															// Reset pointer
-		}
-		if ( !Tstr ) {															// We don't have a buffer we need to create one
-			Tstr = new char[ len ];												// Create a new char array
-			Tstrlen = len;														// We have created a new Temporary string save its length in our variable
-		}
-		read( Tstr, len );														// Read to buffer
-		outstr = Tstr;															// Set external pointer
+	const char *GetStr( unsigned int len ) {
+		const char * out = str + position;
+		position += len;
+		return out;
 	}
 
 	bool atend() {																// Check if we are at the end of string
@@ -397,11 +385,8 @@ public:
 private:
 	unsigned int position = 0;													// Position we are reading the string from
 	unsigned int length = 0;													// Length of string
-	const char* str = 0;														// String pointer
-	char* Tstr = 0;																// Temporary storage char array
-	unsigned int Tstrlen = 0;													// Length of temporary char array
+	const char* str = 0;														// Input string pointer
 };
-
 void BinaryToTableLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream ) {
 	char top = LUA->Top();														// Store Top variable to check if we added something to our stack at the end
 	while ( !stream.atend() ) {													// Loop as long as we have something in our stream or until we reach our endpos
@@ -428,66 +413,66 @@ void BinaryToTableLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream ) {
 				case (TYPECHAR):
 					{
 						signed char out = 0;									// Create variable
-						stream.read( &out, sizeof( char ) );					// Read variable from stream
-						LUA->PushNumber( out );									// Push variable to Lua
+						stream.read( out );										// Read variable from stream
+						LUA->PushNumber( out );								// Push variable to Lua
 						break;
 					}
 				case (TYPESHORT):
 					{
 						short out = 0;											// Create variable
-						stream.read( &out, sizeof( short ) );					// Read variable from stream
+						stream.read( out );										// Read variable from stream
 						LUA->PushNumber( out );									// Push variable to Lua
 						break;
 					}
 				case (TYPEINT):
 					{
 						int out = 0;											// Create variable
-						stream.read( &out, sizeof( int ) );						// Read variable from stream
+						stream.read( out );										// Read variable from stream
 						LUA->PushNumber( out );									// Push variable to Lua
 						break;
 					}
 				case (TYPENUMBER):
 					{
 						double out = 0;											// Create variable
-						stream.read( &out, sizeof( double ) );					// Read variable from stream
+						stream.read( out );										// Read variable from stream
 						LUA->PushNumber( out );									// Push variable to Lua
 						break;
 					}
 				case (TYPESTRINGCHAR):
 					{
-						unsigned int len = 0;									// Create length variable
-						char* str;												// Create pointer
-						stream.ReadString( len, str, sizeof( unsigned char ) );	// Push len, pointer, header length
+						unsigned char len = 0;									// Create length variable
+						stream.read( len );
+						const char* str = stream.GetStr( len ); 					// Push len, pointer, header length
 						LUA->PushString( str, len );							// Push string to Lua with length
 						break;
 					}
 				case (TYPESTRINGSHORT):
 					{
-						unsigned int len = 0;									// Create length variable
-						char* str;												// Create pointer
-						stream.ReadString( len, str, sizeof( unsigned short ) );// Push len, pointer, header length
+						unsigned short len = 0;									// Create length variable
+						stream.read( len );
+						const char* str = stream.GetStr(len); 					// Push len, pointer, header length
 						LUA->PushString( str, len );							// Push string to Lua with length
 						break;
 					}
 				case (TYPESTRINGLONG):
 					{
 						unsigned int len = 0;									// Create length variable
-						char* str;												// Create pointer
-						stream.ReadString( len, str, sizeof( unsigned int ) );	// Push len, pointer, header length
+						stream.read( len );
+						const char* str = stream.GetStr( len ); 					// Push len, pointer, header length
 						LUA->PushString( str, len );							// Push string to Lua with length
 						break;
 					}
 				case (TYPEVECTOR):
 					{
-						Vector vec;												// Create Vector variable
-						stream.read( &vec, sizeof( Vector ) );					// Copy Vector from stream
-						LUA->PushVector( vec );									// Push Vector to Lua
+						Vector vec;										// Create Vector variable
+						stream.read( vec );					// Copy Vector from stream
+						LUA->PushVector( vec );								// Push Vector to Lua
 						break;
 					}
 				case (TYPEANGLE):
 					{
-						QAngle ang;												// Create Angle variable
-						stream.read( &ang, sizeof( QAngle ) );					// Copy Angle from stream
+						QAngle ang;										// Create Angle variable
+						stream.read( ang );					// Copy Angle from stream
 						LUA->PushAngle( ang );									// Push Angle to Lua
 						break;
 					}
@@ -537,68 +522,68 @@ void BinaryToTableLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream )
 				}
 			case (TYPECHAR):
 				{
-					signed char out = 0;										// Create variable
-					stream.read( &out, sizeof( char ) );						// Read variable from stream
-					LUA->PushNumber( out );										// Push variable to Lua
+					signed char out = 0;									// Create variable
+					stream.read( out );										// Read variable from stream
+					LUA->PushNumber( out );								// Push variable to Lua
 					break;
 				}
 			case (TYPESHORT):
 				{
-					short out = 0;												// Create variable
-					stream.read( &out, sizeof( short ) );						// Read variable from stream
-					LUA->PushNumber( out );										// Push variable to Lua
+					short out = 0;											// Create variable
+					stream.read( out );										// Read variable from stream
+					LUA->PushNumber( out );									// Push variable to Lua
 					break;
 				}
 			case (TYPEINT):
 				{
-					int out = 0;												// Create variable
-					stream.read( &out, sizeof( int ) );							// Read variable from stream
-					LUA->PushNumber( out );										// Push variable to Lua
+					int out = 0;											// Create variable
+					stream.read( out );										// Read variable from stream
+					LUA->PushNumber( out );									// Push variable to Lua
 					break;
 				}
 			case (TYPENUMBER):
 				{
-					double out = 0;												// Create variable
-					stream.read( &out, sizeof( double ) );						// Read variable from stream
-					LUA->PushNumber( out );										// Push variable to Lua
+					double out = 0;											// Create variable
+					stream.read( out );										// Read variable from stream
+					LUA->PushNumber( out );									// Push variable to Lua
 					break;
 				}
 			case (TYPESTRINGCHAR):
 				{
-					unsigned int len = 0;										// Create length variable
-					char* str;													// Create pointer
-					stream.ReadString( len, str, sizeof( unsigned char ) );		// Push len, pointer, header length
-					LUA->PushString( str, len );								// Push string to Lua with length
+					unsigned char len = 0;									// Create length variable
+					stream.read( len );
+					const char* str = stream.GetStr( len ); 					// Push len, pointer, header length
+					LUA->PushString( str, len );							// Push string to Lua with length
 					break;
 				}
 			case (TYPESTRINGSHORT):
 				{
-					unsigned int len = 0;										// Create length variable
-					char* str;													// Create pointer
-					stream.ReadString( len, str, sizeof( unsigned short ) );	// Push len, pointer, header length
-					LUA->PushString( str, len );								// Push string to Lua with length
+					unsigned short len = 0;									// Create length variable
+					stream.read( len );
+					const char* str = stream.GetStr( len ); 					// Push len, pointer, header length
+					LUA->PushString( str, len );							// Push string to Lua with length
 					break;
 				}
 			case (TYPESTRINGLONG):
 				{
-					unsigned int len = 0;										// Create length variable
-					char* str;													// Create pointer
-					stream.ReadString( len, str, sizeof( unsigned int ) );		// Push len, pointer, header length
-					LUA->PushString( str, len );								// Push string to Lua with length
+					unsigned int len = 0;									// Create length variable
+					stream.read( len );
+					const char* str = stream.GetStr( len ); 					// Push len, pointer, header length
+					LUA->PushString( str, len );							// Push string to Lua with length
 					break;
 				}
 			case (TYPEVECTOR):
 				{
-					Vector vec;													// Create Vector variable
-					stream.read( &vec, sizeof( Vector ) );						// Copy Vector from stream
-					LUA->PushVector( vec );										// Push Vector to Lua
+					Vector vec;										// Create Vector variable
+					stream.read( vec );					// Copy Vector from stream
+					LUA->PushVector( vec );								// Push Vector to Lua
 					break;
 				}
 			case (TYPEANGLE):
 				{
-					QAngle ang;													// Create Angle variable
-					stream.read( &ang, sizeof( QAngle ) );						// Copy Angle from stream
-					LUA->PushAngle( ang );										// Push Angle to Lua
+					QAngle ang;										// Create Angle variable
+					stream.read( ang );					// Copy Angle from stream
+					LUA->PushAngle( ang );									// Push Angle to Lua
 					break;
 				}
 			case (TYPETABLE):
