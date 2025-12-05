@@ -10,21 +10,21 @@ Verion 1.06 adds a CRC check which is enabled by default. You can turn it off wi
 
 Output from the test.lua:
 ```
-Results with Ryzen 9 5950x on 32bit srcds
-It took util.TableToJSON an average of  0.07506406
-It took util.JSONToTable an average of  0.0618646
-It took TableToBinary an average of     0.00370396
-It took BinaryToTable an average of     0.0042007699999999
-TableToBinary is 20.27 faster than util.TableToJSON
-BinaryToTable is 14.73 faster than util.JSONToTable
-TableToBinary with CRC is 14.09 faster than util.TableToJSON
-BinaryToTable with CRC is 8.53 faster than util.JSONToTable
-TableToBinary produced an output of     859878
-util.TableToJSON produced an output of  1060414
+Results with Ryzen 9 3900x on 32bit srcds (100 loops)
+It took util.TableToJSON an average of 0.13179323
+It took util.JSONToTable an average of 0.14723701
+It took TableToBinary    an average of 0.00686151
+It took BinaryToTable    an average of 0.01347262
+TableToBinary without CRC is 19.40 faster than util.TableToJSON
+BinaryToTable without CRC is 11.05 faster than util.JSONToTable
+TableToBinary with    CRC is 19.21 faster than util.TableToJSON
+BinaryToTable with    CRC is 10.93 faster than util.JSONToTable
+TableToBinary    produced an output of  839878  Byte
+util.TableToJSON produced an output of  1360001 Byte
 ```
 
 
-BinaryToTable is roughly 8X faster than util.JSONToTable
+BinaryToTable is roughly 11X faster than util.JSONToTable Given the near zero difference in CRC and non CRC leave it enabled unless you want to edit the file for some reason.
 
 To compile, download https://github.com/Facepunch/gmod-module-base/tree/development and premake5 https://premake.github.io/
 Put the include folder from gmod-module-base in the folder above gm_binarytable, put premake5.exe in the gm_binarytable folder and run BuildProjects.bat.

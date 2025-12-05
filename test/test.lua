@@ -56,19 +56,19 @@ do
 	end
 	local t5 = SysTime()
 	for i = 1, loopcount do
-		BINOUT = TableToBinary(tab, nil, true)
+		BINOUT = TableToBinary(tab)
 	end
 	local t6 = SysTime()
 	for i = 1, loopcount do
-		BINTABLE = BinaryToTable(BINOUT, true)
+		BINTABLE = BinaryToTable(BINOUT)
 	end
 	local t7 = SysTime()
 
 	-- print results
 	print(string.format("It took util.TableToJSON an average of %.8f", (t2 - t1) / loopcount))
 	print(string.format("It took util.JSONToTable an average of %.8f", (t3 - t2) / loopcount))
-	print(string.format("It took TableToBinary    an average of %.8f", (t4 - t3) / loopcount))
-	print(string.format("It took BinaryToTable    an average of %.8f", (t5 - t4) / loopcount))
+	print(string.format("It took TableToBinary    an average of %.8f", (t6 - t5) / loopcount))
+	print(string.format("It took BinaryToTable    an average of %.8f", (t7 - t6) / loopcount))
 	print(string.format("TableToBinary without CRC is %.2f faster than util.TableToJSON", (t2 - t1) / (t4 - t3)))
 	print(string.format("BinaryToTable without CRC is %.2f faster than util.JSONToTable", (t3 - t2) / (t5 - t4)))
 	print(string.format("TableToBinary with    CRC is %.2f faster than util.TableToJSON", (t2 - t1) / (t6 - t5)))

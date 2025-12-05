@@ -1,16 +1,55 @@
 #include "GarrysMod/Lua/Interface.h"
 #include <string.h>
-#include "crc32.h"
+#include <nmmintrin.h>
 
 namespace global {
-	uint32_t table[ 256 ];
-	void init() {
-		crc32::generate_table( table );
-	}
 	int ToStringFN = 0;
-	int IsColorFN = 0;
-	int ColorFN = 0;
 }
+
+// AI code
+uint32_t crc32_sse42( const void* data, size_t length ) {
+	const uint8_t* p = reinterpret_cast< const uint8_t* >(data);
+
+	// Standard IEEE CRC32 initial seed
+	uint32_t crc = 0xFFFFFFFFu;
+
+#if INTPTR_MAX == INT64_MAX
+	// 64-bit target — align to 8 bytes
+	while ( length && (reinterpret_cast< uintptr_t >(p) & 7) ) {
+		crc = _mm_crc32_u8( crc, *p++ );
+		--length;
+	}
+
+	const uint64_t* p64 = reinterpret_cast< const uint64_t* >(p);
+	while ( length >= 8 ) {
+		crc = _mm_crc32_u64( crc, *p64++ );
+		length -= 8;
+	}
+	p = reinterpret_cast< const uint8_t* >(p64);
+
+#else
+	// 32-bit target — align to 4 bytes
+	while ( length && (reinterpret_cast< uintptr_t >(p) & 3) ) {
+		crc = _mm_crc32_u8( crc, *p++ );
+		--length;
+	}
+
+	const uint32_t* p32 = reinterpret_cast< const uint32_t* >(p);
+	while ( length >= 4 ) {
+		crc = _mm_crc32_u32( crc, *p32++ );
+		length -= 4;
+	}
+	p = reinterpret_cast< const uint8_t* >(p32);
+#endif
+
+	// Tail bytes
+	while ( length-- ) {
+		crc = _mm_crc32_u8( crc, *p++ );
+	}
+
+	return crc ^ 0xFFFFFFFFu;
+}
+
 
 struct Color { // Would make it unsigned short but the engine seems to limit it to 255
 	unsigned char r;
@@ -59,7 +98,7 @@ public:
 	}
 
 	void WriteCRC() {
-		uint32_t crc = crc32::update( global::table, 0, str, position );			// Calculate the current CRC
+		uint32_t crc = crc32_sse42( str, position );								// Calculate the current CRC32 using SSE
 		auto inc = sizeof( char ) + sizeof( uint32_t );
 		if ( position + inc > length ) {
 			unsigned int newlen = position + inc;
@@ -114,6 +153,10 @@ public:
 		return str;													// Return pointer of string
 	}
 
+	void reset() {
+		position = 0;
+	}
+
 private:
 	unsigned int position = 0;										// Position we are currently at
 	unsigned int length = 0;										// String length
@@ -126,7 +169,7 @@ void BinaryToStrLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) {
 		for ( int it = -2; it < 0; it++ ) {
 			int type = LUA->GetType( it );													// Loop 2 then 1. Variable 1 is the key, variable 2 is value.
 			switch ( type ) {
-				case (GarrysMod::Lua::Type::BOOL):
+				case (GarrysMod::Lua::Type::Bool):
 					{
 						if ( LUA->GetBool( it ) ) {											// Check if bool is true or false and write it so we don't have to write 2 byes
 							stream.writetype( BOOLTRUE );									// Write true to stream
@@ -135,7 +178,7 @@ void BinaryToStrLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) {
 						}
 						break;
 					}
-				case (GarrysMod::Lua::Type::NUMBER):
+				case (GarrysMod::Lua::Type::Number):
 					{
 						double in = LUA->GetNumber( it );									// Get number
 						if ( (in - ( long long )in) == 0 ) {								// Check if number is an integer
@@ -168,7 +211,7 @@ void BinaryToStrLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) {
 						}
 						break;
 					}
-				case (GarrysMod::Lua::Type::STRING):
+				case (GarrysMod::Lua::Type::String):
 					{
 						unsigned int len = 0;												// Assign a length variable
 						const char* in = LUA->GetString( it, &len );						// Get string and length
@@ -184,49 +227,51 @@ void BinaryToStrLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) {
 						stream.write( in, len );											// Write string to stream
 						break;
 					}
-				case (GarrysMod::Lua::Type::VECTOR):
+				case (GarrysMod::Lua::Type::Vector):
 					{
 						stream.write( TYPEVECTOR, LUA->GetVector( it ));// Write Vector to stream
 						break;
 					}
-				case (GarrysMod::Lua::Type::ANGLE):
+				case (GarrysMod::Lua::Type::Angle):
 					{
 						stream.write( TYPEANGLE, LUA->GetAngle( it ) );	// Write Angle to stream
 						break;
 					}
-				case (GarrysMod::Lua::Type::TABLE):
+				case (GarrysMod::Lua::Type::Table):
 					{
-						LUA->ReferencePush( global::IsColorFN );								// Check for Color type
-						LUA->Push( it - 1 );													// Push table to -1
-						LUA->Call( 1, 1 );														// Call function IsColor
-						bool Iscolor = LUA->GetBool();											// Get bool result
-						LUA->Pop();																// Pop result
-						if ( Iscolor ) {
-							LUA->Push( it );												// Push table to -1
-							{
-								Color col;
-								LUA->GetField( -1, "r" );										// Get r
-								col.r = LUA->GetNumber( -1 );
+						if ( LUA->GetMetaTable( it ) ) {										// Check if we have a metatable
+							LUA->GetField( -1, "MetaName" );									// get MetaName and compare it
+							const char* metaname = LUA->GetString( -1 );
+							LUA->Pop( 2 );														// Pop metatable and metaname
+							if ( strcmp( metaname, "Color" ) == 0 ) {
+								LUA->Push( it );												// Push table to -1
+								{
+									Color col;
+									LUA->GetField( -1, "r" );									// Get r
+									col.r = LUA->GetNumber( -1 );
+									LUA->Pop();
+									LUA->GetField( -1, "g" );									// Get g
+									col.g = LUA->GetNumber( -1 );
+									LUA->Pop();
+									LUA->GetField( -1, "b" );									// Get b
+									col.b = LUA->GetNumber( -1 );
+									LUA->Pop();
+									LUA->GetField( -1, "a" );									// Get a
+									col.a = LUA->GetNumber( -1 );
+									LUA->Pop();
+									stream.write( TYPECOLOR, col );								// Write to our buffer
+								}
 								LUA->Pop();
-								LUA->GetField( -1, "g" );										// Get g
-								col.g = LUA->GetNumber( -1 );
-								LUA->Pop();
-								LUA->GetField( -1, "b" );										// Get b
-								col.b = LUA->GetNumber( -1 );
-								LUA->Pop();
-								LUA->GetField( -1, "a" );										// Get a
-								col.a = LUA->GetNumber( -1 );
-								LUA->Pop();
-								stream.write( TYPECOLOR, col );
+								break;
 							}
-							LUA->Pop();
-						} else {
-							LUA->Push( it );
-							stream.writetype( TYPETABLE );										// Write table start to stream
-							BinaryToStrLoop( LUA, stream );										// Start this function to extract everything from the table
-							stream.writetype( TYPETABLEEND );									// Write table end to stream
-							LUA->Pop();															// Pop table so we can continue with Next()
 						}
+
+						LUA->Push( it );
+						stream.writetype( TYPETABLE );										// Write table start to stream
+						BinaryToStrLoop( LUA, stream );										// Start this function to extract everything from the table
+						stream.writetype( TYPETABLEEND );									// Write table end to stream
+						LUA->Pop();															// Pop table so we can continue with Next()
+						
 						break;
 					}
 				default:
@@ -262,7 +307,7 @@ void BinaryToStrLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) 
 	while ( LUA->Next( -2 ) ) {																// Get Next variable
 		int type = LUA->GetType( -1 );														// Loop 2 then 1. Variable 1 is the key, variable 2 is value.
 		switch ( type ) {
-			case (GarrysMod::Lua::Type::BOOL):
+			case (GarrysMod::Lua::Type::Bool):
 				{
 					if ( LUA->GetBool( -1 ) ) {												// Check if bool is true or false and write it so we don't have to write 2 byes
 						stream.writetype( BOOLTRUE );										// Write true to stream
@@ -271,7 +316,7 @@ void BinaryToStrLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) 
 					}
 					break;
 				}
-			case (GarrysMod::Lua::Type::NUMBER):
+			case (GarrysMod::Lua::Type::Number):
 				{
 					double in = LUA->GetNumber( -1 );										// Get number
 					if ( (in - ( long long )in) == 0 ) {									// Check if number is an integer
@@ -304,7 +349,7 @@ void BinaryToStrLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) 
 					}
 					break;
 				}
-			case (GarrysMod::Lua::Type::STRING):
+			case (GarrysMod::Lua::Type::String):
 				{
 					unsigned int len = 0;													// Assign a length variable
 					const char* in = LUA->GetString( -1, &len );							// Get string and length
@@ -320,49 +365,51 @@ void BinaryToStrLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) 
 					stream.write( in, len );												// Write string to stream
 					break;
 				}
-			case (GarrysMod::Lua::Type::VECTOR):
+			case (GarrysMod::Lua::Type::Vector):
 				{
 					stream.write( TYPEVECTOR, LUA->GetVector( -1 ) );						// Write Vector to stream
 					break;
 				}
-			case (GarrysMod::Lua::Type::ANGLE):
+			case (GarrysMod::Lua::Type::Angle):
 				{
 					stream.write( TYPEANGLE, LUA->GetAngle( -1 ) );							// Write Angle to stream
 					break;
 				}
-			case (GarrysMod::Lua::Type::TABLE):
+			case (GarrysMod::Lua::Type::Table):
 				{
-					LUA->ReferencePush( global::IsColorFN );								// Check for Color type
-					LUA->Push( -2 );														// Push table to -1
-					LUA->Call( 1, 1 );														// Call function IsColor
-					bool Iscolor = LUA->GetBool();											// Get bool result
-					LUA->Pop();																// Pop result
-					if ( Iscolor ) {
-						LUA->Push( -1 );													// Push table to -1
-						{
-							Color col;
-							LUA->GetField( -1, "r" );										// Get r
-							col.r = LUA->GetNumber( -1 );
+					if ( LUA->GetMetaTable( -1 ) ) {											// check if we have a metatable
+						LUA->GetField( -1, "MetaName" );										// get MetaName and compare it
+						const char* metaname = LUA->GetString( -1 );
+						LUA->Pop( 2 );															// Pop metatable and MetaName
+						if ( strcmp( metaname, "Color" ) == 0 ) {
+							LUA->Push( -1 );													// Push table to -1
+							{
+								Color col;
+								LUA->GetField( -1, "r" );										// Get r
+								col.r = LUA->GetNumber( -1 );
+								LUA->Pop();
+								LUA->GetField( -1, "g" );										// Get g
+								col.g = LUA->GetNumber( -1 );
+								LUA->Pop();
+								LUA->GetField( -1, "b" );										// Get b
+								col.b = LUA->GetNumber( -1 );
+								LUA->Pop();
+								LUA->GetField( -1, "a" );										// Get a
+								col.a = LUA->GetNumber( -1 );
+								LUA->Pop();
+								stream.write( TYPECOLOR, col );
+							}
 							LUA->Pop();
-							LUA->GetField( -1, "g" );										// Get g
-							col.g = LUA->GetNumber( -1 );
-							LUA->Pop();
-							LUA->GetField( -1, "b" );										// Get b
-							col.b = LUA->GetNumber( -1 );
-							LUA->Pop();
-							LUA->GetField( -1, "a" );										// Get a
-							col.a = LUA->GetNumber( -1 );
-							LUA->Pop();
-							stream.write( TYPECOLOR, col );
+							break;
 						}
-						LUA->Pop();
-					} else {
-						LUA->Push( -1 );
-						stream.writetype( TYPETABLE );										// Write table start to stream
-						BinaryToStrLoopSeq( LUA, stream );									// Start this function to extract everything from the table
-						stream.writetype( TYPETABLEEND );									// Write table end to stream
-						LUA->Pop();															// Pop table so we can continue with Next()
 					}
+
+					LUA->Push( -1 );
+					stream.writetype( TYPETABLE );										// Write table start to stream
+					BinaryToStrLoopSeq( LUA, stream );									// Start this function to extract everything from the table
+					stream.writetype( TYPETABLEEND );									// Write table end to stream
+					LUA->Pop();															// Pop table so we can continue with Next()
+					
 					break;
 				}
 			default:
@@ -393,14 +440,15 @@ void BinaryToStrLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) 
 }
 
 LUA_FUNCTION( TableToBinary ) {
-	LUA->CheckType( 1, GarrysMod::Lua::Type::TABLE );							// Check if our input is a table
+	LUA->CheckType( 1, GarrysMod::Lua::Type::Table );							// Check if our input is a table
 	bool CheckCRC = true;														// auto enabled
-	if ( LUA->GetType( 3 ) == GarrysMod::Lua::Type::BOOL ) { // For crc check
+	if ( LUA->GetType( 3 ) == GarrysMod::Lua::Type::Bool ) { // For crc check
 		CheckCRC = LUA->GetBool( 3 );
 	}
-	if ( LUA->GetType( 2 ) == GarrysMod::Lua::Type::BOOL && LUA->GetBool( 2 ) ) {// Check if we have a second variable if this is true we assume the table is sequential
+	static QuickStrWrite stream;												// Custom stringstream replacement for this specific thing
+	stream.reset();
+	if ( LUA->GetType( 2 ) == GarrysMod::Lua::Type::Bool && LUA->GetBool( 2 ) ) {// Check if we have a second variable if this is true we assume the table is sequential
 		LUA->Push( 1 );															// Push table to -1
-		QuickStrWrite stream;													// Custom stringstream replacement for this specific thing
 		stream.writetype( TYPETABLESEQ );										// Write Sequential table indicator
 		BinaryToStrLoopSeq( LUA, stream );										// Compute table into string
 		LUA->Pop();																// Pop table
@@ -411,7 +459,6 @@ LUA_FUNCTION( TableToBinary ) {
 		return 1;
 	}
 	LUA->Push( 1 );																// Push table to -1
-	QuickStrWrite stream;														// Custom stringstream replacement for this specific thing
 	BinaryToStrLoop( LUA, stream );												// Compute table into string
 	LUA->Pop();																	// Pop table
 	if ( CheckCRC ) {															// Check for CRC
@@ -430,12 +477,6 @@ public:
 
 	unsigned char GetType() {
 		return *str++;															// Probably faster than calling memmove
-	}
-
-	template<class T>
-	void read( T &to ) {
-		to = *(T*)(str);														// Make a fake copy by setting it to an offset of the pointer of our input
-		str += sizeof(T);														// Offset pointer
 	}
 
 	template<class T>
@@ -465,10 +506,6 @@ void BinaryToTableLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream ) {
 	while ( !stream.atend() ) {													// Loop as long as we have something in our stream or until we reach our endpos
 		for ( int i = 0; i < 2; i++ ) {											// Loop twice for key and variable
 			switch ( stream.GetType() ) {										// Get type and run corresponding code
-				case (0):
-					{
-						return;													// This should not happen
-					}
 				case (TYPETABLEEND):
 					{
 						return;													// We are at the end of our table there is nothing left
@@ -485,80 +522,76 @@ void BinaryToTableLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream ) {
 					}
 				case (TYPECHAR):
 					{
-						signed char out = 0;									// Create variable
-						stream.read( out );										// Read variable from stream
-						LUA->PushNumber( out );								// Push variable to Lua
+						signed char *out = stream.read<signed char>();										// Read variable from stream
+						LUA->PushNumber( *out );								// Push variable to Lua
 						break;
 					}
 				case (TYPESHORT):
 					{
-						short out = 0;											// Create variable
-						stream.read( out );										// Read variable from stream
-						LUA->PushNumber( out );									// Push variable to Lua
+						short *out = stream.read<short>();										// Read variable from stream
+						LUA->PushNumber( *out );									// Push variable to Lua
 						break;
 					}
 				case (TYPEINT):
 					{
-						int out = 0;											// Create variable
-						stream.read( out );										// Read variable from stream
-						LUA->PushNumber( out );									// Push variable to Lua
+						int *out = stream.read<int>();										// Read variable from stream
+						LUA->PushNumber( *out );									// Push variable to Lua
 						break;
 					}
 				case (TYPENUMBER):
 					{
-						double out = 0;											// Create variable
-						stream.read( out );										// Read variable from stream
-						LUA->PushNumber( out );									// Push variable to Lua
+						double *out = stream.read<double>();										// Read variable from stream
+						LUA->PushNumber( *out );									// Push variable to Lua
 						break;
 					}
 				case (TYPESTRINGCHAR):
 					{
-						unsigned char len = 0;									// Create length variable
-						stream.read( len );
-						const char* str = stream.GetStr( len ); 				// Push len, pointer, header length
-						LUA->PushString( str, len );							// Push string to Lua with length
+						unsigned char *len = stream.read<unsigned char>();
+						const char* str = stream.GetStr( *len ); 				// Push len, pointer, header length
+						LUA->PushString( str, *len );							// Push string to Lua with length
 						break;
 					}
 				case (TYPESTRINGSHORT):
 					{
-						unsigned short len = 0;									// Create length variable
-						stream.read( len );
-						const char* str = stream.GetStr(len); 					// Push len, pointer, header length
-						LUA->PushString( str, len );							// Push string to Lua with length
+						unsigned short *len = stream.read<unsigned short>();
+						const char* str = stream.GetStr( *len ); 					// Push len, pointer, header length
+						LUA->PushString( str, *len );							// Push string to Lua with length
 						break;
 					}
 				case (TYPESTRINGLONG):
 					{
-						unsigned int len = 0;									// Create length variable
-						stream.read( len );
-						const char* str = stream.GetStr( len ); 				// Push len, pointer, header length
-						LUA->PushString( str, len );							// Push string to Lua with length
+						unsigned int *len = stream.read<unsigned int>();
+						const char* str = stream.GetStr( *len ); 				// Push len, pointer, header length
+						LUA->PushString( str, *len );							// Push string to Lua with length
 						break;
 					}
 				case (TYPEVECTOR):
 					{
-						Vector vec;												// Create Vector variable
-						stream.read( vec );										// Copy Vector from stream
-						LUA->PushVector( vec );									// Push Vector to Lua
+						Vector *vec = stream.read<Vector>();										// Copy Vector from stream
+						LUA->PushVector( *vec );									// Push Vector to Lua
 						break;
 					}
 				case (TYPEANGLE):
 					{
-						QAngle ang;												// Create Angle variable
-						stream.read( ang );										// Copy Angle from stream
-						LUA->PushAngle( ang );									// Push Angle to Lua
+						QAngle *ang = stream.read<QAngle>();										// Copy Angle from stream
+						LUA->PushAngle( *ang );									// Push Angle to Lua
 						break;
 					}
 				case (TYPECOLOR):
 					{
 						Color* col = stream.read<Color>();
 
-						LUA->ReferencePush( global::ColorFN );
+						LUA->CreateTable();
 						LUA->PushNumber( col->r );
+						LUA->SetField(-2, "r");
 						LUA->PushNumber( col->g );
+						LUA->SetField( -2, "g" );
 						LUA->PushNumber( col->b );
+						LUA->SetField( -2, "b" );
 						LUA->PushNumber( col->a );
-						LUA->Call( 4, 1 );
+						LUA->SetField( -2, "a" );
+						LUA->CreateMetaTable("Color");
+						LUA->SetMetaTable( -2 );
 
 						break;
 					}
@@ -568,6 +601,7 @@ void BinaryToTableLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream ) {
 						BinaryToTableLoop( LUA, stream );						// Call this function
 						break;
 					}
+				case (0):
 				default:														// should never happen
 					break;
 			}
@@ -608,80 +642,76 @@ void BinaryToTableLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream )
 				}
 			case (TYPECHAR):
 				{
-					signed char out = 0;									// Create variable
-					stream.read( out );										// Read variable from stream
-					LUA->PushNumber( out );									// Push variable to Lua
+					signed char* out = stream.read<signed char>();						// Read variable from stream
+					LUA->PushNumber( *out );									// Push variable to Lua
 					break;
 				}
 			case (TYPESHORT):
 				{
-					short out = 0;											// Create variable
-					stream.read( out );										// Read variable from stream
-					LUA->PushNumber( out );									// Push variable to Lua
+					short* out = stream.read<short>();						// Read variable from stream
+					LUA->PushNumber( *out );									// Push variable to Lua
 					break;
 				}
 			case (TYPEINT):
 				{
-					int out = 0;											// Create variable
-					stream.read( out );										// Read variable from stream
-					LUA->PushNumber( out );									// Push variable to Lua
+					int* out = stream.read<int>();						// Read variable from stream
+					LUA->PushNumber( *out );									// Push variable to Lua
 					break;
 				}
 			case (TYPENUMBER):
 				{
-					double out = 0;											// Create variable
-					stream.read( out );										// Read variable from stream
-					LUA->PushNumber( out );									// Push variable to Lua
+					double* out = stream.read<double>();						// Read variable from stream
+					LUA->PushNumber( *out );									// Push variable to Lua
 					break;
 				}
 			case (TYPESTRINGCHAR):
 				{
-					unsigned char len = 0;										// Create length variable
-					stream.read( len );
-					const char* str = stream.GetStr( len ); 					// Push len, pointer, header length
-					LUA->PushString( str, len );								// Push string to Lua with length
+					unsigned char *len = stream.read<unsigned char>();
+					const char* str = stream.GetStr( *len ); 					// Push len, pointer, header length
+					LUA->PushString( str, *len );								// Push string to Lua with length
 					break;
 				}
 			case (TYPESTRINGSHORT):
 				{
-					unsigned short len = 0;										// Create length variable
-					stream.read( len );
-					const char* str = stream.GetStr( len ); 					// Push len, pointer, header length
-					LUA->PushString( str, len );								// Push string to Lua with length
+					unsigned short *len = stream.read<unsigned short>();
+					const char* str = stream.GetStr( *len ); 					// Push len, pointer, header length
+					LUA->PushString( str, *len );								// Push string to Lua with length
 					break;
 				}
 			case (TYPESTRINGLONG):
 				{
-					unsigned int len = 0;										// Create length variable
-					stream.read( len );
-					const char* str = stream.GetStr( len ); 					// Push len, pointer, header length
-					LUA->PushString( str, len );								// Push string to Lua with length
+					unsigned int *len = stream.read<unsigned int>();
+					const char* str = stream.GetStr( *len ); 					// Push len, pointer, header length
+					LUA->PushString( str, *len );								// Push string to Lua with length
 					break;
 				}
 			case (TYPEVECTOR):
 				{
-					Vector vec;												// Create Vector variable
-					stream.read( vec );										// Copy Vector from stream
-					LUA->PushVector( vec );									// Push Vector to Lua
+					Vector *vec = stream.read<Vector>();										// Copy Vector from stream
+					LUA->PushVector( *vec );									// Push Vector to Lua
 					break;
 				}
 			case (TYPEANGLE):
 				{
-					QAngle ang;												// Create Angle variable
-					stream.read( ang );										// Copy Angle from stream
-					LUA->PushAngle( ang );									// Push Angle to Lua
+					QAngle *ang = stream.read<QAngle>();
+					LUA->PushAngle( *ang );									// Push Angle to Lua
 					break;
 				}
 			case (TYPECOLOR):
 				{
 					Color *col = stream.read<Color>();
 
-					LUA->ReferencePush( global::ColorFN );
+					LUA->CreateTable();
 					LUA->PushNumber( col->r );
+					LUA->SetField( -2, "r" );
 					LUA->PushNumber( col->g );
+					LUA->SetField( -2, "g" );
 					LUA->PushNumber( col->b );
+					LUA->SetField( -2, "b" );
 					LUA->PushNumber( col->a );
-					LUA->Call( 4, 1 );
+					LUA->SetField( -2, "a" );
+					LUA->CreateMetaTable( "Color" );
+					LUA->SetMetaTable( -2 );
 
 					break;
 				}
@@ -703,9 +733,9 @@ void BinaryToTableLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream )
 }
 
 LUA_FUNCTION( BinaryToTable ) {
-	LUA->CheckType( 1, GarrysMod::Lua::Type::STRING );		// Check type is string
+	LUA->CheckType( 1, GarrysMod::Lua::Type::String );		// Check type is string
 	bool CheckCRC = true;									// auto enabled
-	if ( LUA->GetType( 2 ) == GarrysMod::Lua::Type::BOOL ) {// For crc check
+	if ( LUA->GetType( 2 ) == GarrysMod::Lua::Type::Bool ) {// For crc check
 		CheckCRC = LUA->GetBool( 2 );
 	}
 	unsigned int len = 0;									// This will be our string length
@@ -716,7 +746,7 @@ LUA_FUNCTION( BinaryToTable ) {
 			uint32_t knownCRC = 0;
 			memmove( &knownCRC, str + sizeof( char ), sizeof( uint32_t ) );
 			// We need to calculate the CRC from an offset
-			uint32_t crc = crc32::update( global::table, 0, str + offset, len - offset );
+			uint32_t crc = crc32_sse42( str + offset, len - offset );
 			if ( knownCRC != crc ) {
 				LUA->ThrowError("CRC does not match");
 				return 0;
@@ -753,13 +783,7 @@ GMOD_MODULE_OPEN() {
 	LUA->SetTable( -3 );									// Set variables to _G
 	LUA->GetField( -1, "tostring" );						// Get function tostring
 	global::ToStringFN = LUA->ReferenceCreate();			// Create reference to function tostring
-	LUA->GetField( -1, "IsColor" );							// Get function IsColor
-	global::IsColorFN = LUA->ReferenceCreate();				// Create reference to function IsColor
-	LUA->GetField( -1, "Color" );							// Get function Color
-	global::ColorFN = LUA->ReferenceCreate();				// Create reference to function Color
 	LUA->Pop();												// Pop _G
-
-	global::init();
 
 	return 0;
 }
@@ -767,7 +791,6 @@ GMOD_MODULE_OPEN() {
 
 GMOD_MODULE_CLOSE() {
 	LUA->ReferenceFree( global::ToStringFN );
-	LUA->ReferenceFree( global::IsColorFN );
-	LUA->ReferenceFree( global::ColorFN );
+
 	return 0;
 }
