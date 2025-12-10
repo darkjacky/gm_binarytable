@@ -26,8 +26,18 @@ project "gmsv_binarytable_32"
         targetextension ".dll"
 
     filter "system:linux"
+        optimize "Speed"
         targetsuffix "_linux32"
         targetextension ".dll"
+		defines { "BUILDAVX512" }
+		buildoptions {
+			"-mavx512f",
+			"-mavx512vl",
+			"-mavx512bw",
+			"-mavx512dq",
+			"-mvpclmulqdq",
+			"-mpclmul"
+		}
 
     filter { "configurations:Release", "system:windows" }
         optimize "Speed"
@@ -66,8 +76,18 @@ project "gmsv_binarytable_64"
         targetextension ".dll"
 
     filter "system:linux"
+        optimize "Speed"
         targetsuffix "_linux64"
         targetextension ".dll"
+		defines { "BUILDAVX512" }
+		buildoptions {
+			"-mavx512f",
+			"-mavx512vl",
+			"-mavx512bw",
+			"-mavx512dq",
+			"-mvpclmulqdq",
+			"-mpclmul"
+		}
 
     filter { "configurations:Release", "system:windows" }
         optimize "Speed"
