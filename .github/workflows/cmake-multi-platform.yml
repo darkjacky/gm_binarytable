@@ -34,7 +34,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          submodules: recursive
+        
       # ----------------------------
       # Install Premake5 beta7
       # ----------------------------
@@ -51,12 +53,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Remove-Item premake.zip
-          Remove-Item premake5.exe
           Invoke-WebRequest `
             https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/premake-5.0.0-beta7-windows.zip `
             -OutFile premake.zip
           Expand-Archive -Force premake.zip -DestinationPath .
+          Remove-Item premake.zip
 
       # ----------------------------
       # Linux Setup
