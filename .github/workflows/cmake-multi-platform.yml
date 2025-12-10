@@ -53,7 +53,7 @@ jobs:
         run: |
           Invoke-WebRequest `
             https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/premake-5.0.0-beta7-windows.zip `
-            -OutFile premake.zip
+            -Force -OutFile premake.zip
           Expand-Archive premake.zip -DestinationPath .
 
       # ----------------------------
@@ -85,9 +85,8 @@ jobs:
       # ----------------------------
       - name: Build (Linux)
         if: runner.os == 'Linux'
-        run: |
-          make config=release CC=gcc CXX=g++ \
-            CFLAGS="${{ matrix.flags }}" CXXFLAGS="${{ matrix.flags }}"
+        working-directory: ./projects/linux
+        run: make
 
       # ----------------------------
       # Build (Windows)
@@ -110,5 +109,5 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gmsv_binarytable_${{ matrix.os }}_${{ matrix.arch }}
+          name: gmsv_binarytable_${{ matrix.os }}${{ matrix.arch }}
           path: build/**
