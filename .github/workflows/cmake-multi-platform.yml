@@ -1,4 +1,4 @@
-name: Build (Premake)
+name: Build gmsv_binarytable
 
 on:
   push:
@@ -6,53 +6,44 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }} - ${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ----------------------
-          # Linux
-          # ----------------------
+          # Linux 64-bit
           - os: ubuntu-latest
-            arch: x64
-            premake_os: linux
-            premake_file: premake-5.0.0-beta7-linux.tar.gz
+            arch: x86_64
+            flags: ""
 
+          # Linux 32-bit
           - os: ubuntu-latest
             arch: x86
-            premake_os: linux
-            premake_file: premake-5.0.0-beta7-linux.tar.gz
             flags: "-m32"
 
-          # ----------------------
-          # Windows
-          # ----------------------
+          # Windows 64-bit
           - os: windows-latest
-            arch: x64
-            premake_os: windows
-            premake_file: premake-5.0.0-beta7-windows.zip
+            arch: x86_64
             vs_platform: x64
 
+          # Windows 32-bit
           - os: windows-latest
             arch: x86
-            premake_os: windows
-            premake_file: premake-5.0.0-beta7-windows.zip
             vs_platform: Win32
 
     steps:
       - uses: actions/checkout@v4
 
-      # -------------------------------------------------------
+      # ----------------------------
       # Install Premake5 beta7
-      # -------------------------------------------------------
+      # ----------------------------
       - name: Download Premake5 (Linux)
         if: runner.os == 'Linux'
-        shell: bash
         run: |
-          curl -L "https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/${{ matrix.premake_file }}" -o premake.tar.gz
+          curl -L \
+            https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/premake-5.0.0-beta7-linux.tar.gz \
+            -o premake.tar.gz
           tar -xzf premake.tar.gz
           chmod +x premake5
 
@@ -60,52 +51,64 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/${{ matrix.premake_file }}" -OutFile premake.zip
+          Invoke-WebRequest `
+            https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/premake-5.0.0-beta7-windows.zip `
+            -OutFile premake.zip
           Expand-Archive premake.zip -DestinationPath .
-          Rename-Item -Path premake5.exe -NewName premake5.exe
 
-      # -------------------------------------------------------
-      # LINUX BUILDS
-      # -------------------------------------------------------
-      - name: Install 32-bit toolchain (Linux only)
+      # ----------------------------
+      # Linux Setup
+      # ----------------------------
+      - name: Install 32-bit toolchain (Linux)
         if: runner.os == 'Linux' && matrix.arch == 'x86'
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib
 
-      - name: Generate Makefiles (Linux)
+      # ----------------------------
+      # Generate projects
+      # ----------------------------
+      - name: Premake (Linux)
         if: runner.os == 'Linux'
         run: |
           ./premake5 gmake2
 
-      - name: Build (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          cd build
-          make config=release CFLAGS="${{ matrix.flags }}" CXXFLAGS="${{ matrix.flags }}"
-
-      # -------------------------------------------------------
-      # WINDOWS BUILDS
-      # -------------------------------------------------------
-      - name: Generate VS project (Windows)
+      - name: Premake (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           ./premake5.exe vs2022
 
+      # ----------------------------
+      # Build (Linux)
+      # ----------------------------
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          make config=release CC=gcc CXX=g++ \
+            CFLAGS="${{ matrix.flags }}" CXXFLAGS="${{ matrix.flags }}"
+
+      # ----------------------------
+      # Build (Windows)
+      # ----------------------------
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          msbuild build/gm_binarytable.vcxproj /p:Configuration=Release /p:Platform=${{ matrix.vs_platform }}
+          msbuild projects/windows/gmsv_binarytable_32.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.vs_platform }}
 
-      # -------------------------------------------------------
-      # Upload artifacts
-      # -------------------------------------------------------
-      - name: Upload binaries
+          msbuild projects/windows/gmsv_binarytable_64.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.vs_platform }}
+
+      # ----------------------------
+      # Upload compiled binaries
+      # ----------------------------
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gm_binarytable_${{ matrix.os }}_${{ matrix.arch }}
-          path: |
-            build/bin/**/*
+          name: gmsv_binarytable_${{ matrix.os }}_${{ matrix.arch }}
+          path: build/**
