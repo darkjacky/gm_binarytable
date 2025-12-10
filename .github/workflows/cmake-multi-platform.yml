@@ -51,10 +51,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          Remove-Item premake.zip
+          Remove-Item premake5.exe
           Invoke-WebRequest `
             https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/premake-5.0.0-beta7-windows.zip `
-            -Force -OutFile premake.zip
-          Expand-Archive premake.zip -DestinationPath .
+            -OutFile premake.zip
+          Expand-Archive -Force premake.zip -DestinationPath .
 
       # ----------------------------
       # Linux Setup
@@ -72,7 +74,7 @@ jobs:
       - name: Premake (Linux)
         if: runner.os == 'Linux'
         run: |
-          ./premake5 gmake2
+          ./premake5 gmake
 
       - name: Premake (Windows)
         if: runner.os == 'Windows'
