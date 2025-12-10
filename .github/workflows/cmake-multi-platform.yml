@@ -116,4 +116,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gmsv_binarytable_${{ matrix.os }}${{ matrix.project_suffix }}
-          path: build/**
+          path: build/gmsv_binarytable*.dll
+          if-no-files-found: error
