@@ -15,22 +15,24 @@ jobs:
           # Linux 64-bit
           - os: ubuntu-latest
             arch: x86_64
-            flags: ""
+            project_suffix: "64"
 
           # Linux 32-bit
           - os: ubuntu-latest
             arch: x86
-            flags: "-m32"
+            project_suffix: "32"
 
           # Windows 64-bit
           - os: windows-latest
             arch: x86_64
             vs_platform: x64
+            project_suffix: "64"
 
           # Windows 32-bit
           - os: windows-latest
             arch: x86
             vs_platform: Win32
+            project_suffix: "32"
 
     steps:
       - uses: actions/checkout@v4
@@ -83,13 +85,17 @@ jobs:
         run: |
           ./premake5.exe vs2022
 
+      - name: Setup MSBuild (Windows)
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v1.4.0
+
       # ----------------------------
       # Build (Linux)
       # ----------------------------
       - name: Build (Linux)
         if: runner.os == 'Linux'
         working-directory: ./projects/linux
-        run: make
+        run: make -f gmsv_binarytable_${{ matrix.project_suffix }}.make
 
       # ----------------------------
       # Build (Windows)
@@ -98,11 +104,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          msbuild projects/windows/gmsv_binarytable_32.vcxproj `
-            /p:Configuration=Release `
-            /p:Platform=${{ matrix.vs_platform }}
-
-          msbuild projects/windows/gmsv_binarytable_64.vcxproj `
+          msbuild projects/windows/gmsv_binarytable_${{ matrix.project_suffix }}.vcxproj `
             /p:Configuration=Release `
             /p:Platform=${{ matrix.vs_platform }}
 
@@ -112,5 +114,5 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gmsv_binarytable_${{ matrix.os }}${{ matrix.arch }}
+          name: gmsv_binarytable_${{ matrix.os }}${{ matrix.project_suffix }}
           path: build/**
