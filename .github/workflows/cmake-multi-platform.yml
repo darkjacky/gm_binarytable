@@ -84,11 +84,7 @@ jobs:
         shell: pwsh
         run: |
           ./premake5.exe vs2022
-
-      - name: Setup MSBuild (Windows)
-        if: runner.os == 'Windows'
-        uses: microsoft/setup-msbuild@v1.4.0
-
+          
       # ----------------------------
       # Build (Linux)
       # ----------------------------
@@ -97,6 +93,11 @@ jobs:
         working-directory: ./projects/linux
         run: make -f gmsv_binarytable_${{ matrix.project_suffix }}.make
 
+
+      - name: Setup MSBuild (Windows)
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v2
+        
       # ----------------------------
       # Build (Windows)
       # ----------------------------
