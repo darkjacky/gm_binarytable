@@ -1,28 +1,83 @@
 workspace "gmsv_binarytable"
-    configurations { "Debug", "Release" }
-    location ( "projects/" .. os.get() )
+    configurations { "Release" }
+    location ("projects/" .. os.target())
 
-project "gmsv_binarytable"
-    kind         "SharedLib"
-    architecture "x86"
-    language     "C++"
-    includedirs  "../include/"
-    targetdir    "build"
-    symbols      "On"
-    
-    if os.is( "windows" ) then targetsuffix "_win32" end
-    if os.is( "macosx" )  then targetsuffix "_osx"   end
-    if os.is( "linux" )   then targetsuffix "_linux" end
+-- ========================
+-- 32-bit project
+-- ========================
+project "gmsv_binarytable_32"
+    kind "SharedLib"
+    language "C++"
+    architecture "x86"         -- 32-bit
+    includedirs { "gmod-module-base/include/" }
+    targetdir "build"       -- separate output folder
+    symbols "On"
+	targetname "gmsv_binarytable"
+	targetextension ".dll"
+	targetprefix ""
 
-    configuration "Debug"
-        optimize "Debug"
+    filter "system:windows"
+        targetsuffix "_win32"
+        targetextension ".dll"
+        staticruntime "On"
 
-    configuration "Release"
+    filter "system:macosx"
+        targetsuffix "_osx32"
+        targetextension ".dll"
+
+    filter "system:linux"
+        targetsuffix "_linux32"
+        targetextension ".dll"
+
+    filter { "configurations:Release", "system:windows" }
         optimize "Speed"
-        flags    "StaticRuntime"
+        linktimeoptimization "On"
+        buildoptions { "/Ot", "/Ob2", "/Oi", "/Oy" }
+		defines { "BUILDAVX512" }
 
-    files
-    {
-        "source/**.*",
-        "../include/**.*"
-    }
+    filter { "configurations:Release", "system:not windows" }
+        optimize "Speed"
+        linktimeoptimization "On"
+
+    filter {}
+    files { "source/**.*" }
+
+-- ========================
+-- 64-bit project
+-- ========================
+project "gmsv_binarytable_64"
+    kind "SharedLib"
+    language "C++"
+    architecture "x86_64"      -- 64-bit
+    includedirs { "gmod-module-base/include/" }
+    targetdir "build"       -- separate output folder
+    symbols "On"
+	targetname "gmsv_binarytable"
+	targetextension ".dll"
+	targetprefix ""
+
+    filter "system:windows"
+        targetsuffix "_win64"
+        targetextension ".dll"
+        staticruntime "On"
+
+    filter "system:macosx"
+        targetsuffix "_osx64"
+        targetextension ".dll"
+
+    filter "system:linux"
+        targetsuffix "_linux64"
+        targetextension ".dll"
+
+    filter { "configurations:Release", "system:windows" }
+        optimize "Speed"
+        linktimeoptimization "On"
+        buildoptions { "/Ot", "/Ob2", "/Oi", "/Oy" }
+		defines { "BUILDAVX512" }
+
+    filter { "configurations:Release", "system:not windows" }
+        optimize "Speed"
+        linktimeoptimization "On"
+
+    filter {}
+    files { "source/**.*" }

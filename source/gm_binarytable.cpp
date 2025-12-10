@@ -1,61 +1,21 @@
 #include "GarrysMod/Lua/Interface.h"
 #include <string.h>
-#include <nmmintrin.h>
+#include "crc32.h"
 
 namespace global {
 	int ToStringFN = 0;
+	int Matrix = 0;
 }
-
-// AI code
-uint32_t crc32_sse42( const void* data, size_t length ) {
-	const uint8_t* p = reinterpret_cast< const uint8_t* >(data);
-
-	// Standard IEEE CRC32 initial seed
-	uint32_t crc = 0xFFFFFFFFu;
-
-#if INTPTR_MAX == INT64_MAX
-	// 64-bit target — align to 8 bytes
-	while ( length && (reinterpret_cast< uintptr_t >(p) & 7) ) {
-		crc = _mm_crc32_u8( crc, *p++ );
-		--length;
-	}
-
-	const uint64_t* p64 = reinterpret_cast< const uint64_t* >(p);
-	while ( length >= 8 ) {
-		crc = _mm_crc32_u64( crc, *p64++ );
-		length -= 8;
-	}
-	p = reinterpret_cast< const uint8_t* >(p64);
-
-#else
-	// 32-bit target — align to 4 bytes
-	while ( length && (reinterpret_cast< uintptr_t >(p) & 3) ) {
-		crc = _mm_crc32_u8( crc, *p++ );
-		--length;
-	}
-
-	const uint32_t* p32 = reinterpret_cast< const uint32_t* >(p);
-	while ( length >= 4 ) {
-		crc = _mm_crc32_u32( crc, *p32++ );
-		length -= 4;
-	}
-	p = reinterpret_cast< const uint8_t* >(p32);
-#endif
-
-	// Tail bytes
-	while ( length-- ) {
-		crc = _mm_crc32_u8( crc, *p++ );
-	}
-
-	return crc ^ 0xFFFFFFFFu;
-}
-
 
 struct Color { // Would make it unsigned short but the engine seems to limit it to 255
 	unsigned char r;
 	unsigned char g;
 	unsigned char b;
 	unsigned char a;
+};
+
+struct VMatrix {
+	float m[ 4 ][ 4 ];
 };
 
 unsigned int GetStoreSize( long long i ) {
@@ -84,6 +44,7 @@ static const char TYPETABLE = 12;
 static const char TYPETABLEEND = 13;
 static const char TYPETABLESEQ = 14;
 static const char TYPECOLOR = 15;
+static const char TYPEVMATRIX = 16;
 static const char TYPECRC = 127;
 
 class QuickStrWrite {
@@ -98,7 +59,7 @@ public:
 	}
 
 	void WriteCRC() {
-		uint32_t crc = crc32_sse42( str, position );								// Calculate the current CRC32 using SSE
+		uint32_t crc = crc32_sb16::update( str, position );								// Calculate the current CRC32 using SSE
 		auto inc = sizeof( char ) + sizeof( uint32_t );
 		if ( position + inc > length ) {
 			unsigned int newlen = position + inc;
@@ -274,6 +235,12 @@ void BinaryToStrLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) {
 						
 						break;
 					}
+				case (GarrysMod::Lua::Type::Matrix):
+					{
+						auto trix = *LUA->GetUserType<VMatrix>( it, GarrysMod::Lua::Type::Matrix );
+						stream.write( TYPEVMATRIX, trix );
+						break;
+					}
 				default:
 					{
 						// We do not know this type so we will use build in functions to convert it into a string
@@ -410,6 +377,12 @@ void BinaryToStrLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrWrite& stream ) 
 					stream.writetype( TYPETABLEEND );									// Write table end to stream
 					LUA->Pop();															// Pop table so we can continue with Next()
 					
+					break;
+				}
+			case (GarrysMod::Lua::Type::Matrix):
+				{
+					auto trix = *LUA->GetUserType<VMatrix>( -1, GarrysMod::Lua::Type::Matrix );
+					stream.write( TYPEVMATRIX, trix );
 					break;
 				}
 			default:
@@ -595,6 +568,17 @@ void BinaryToTableLoop( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream ) {
 
 						break;
 					}
+				case (TYPEVMATRIX):
+					{
+						VMatrix* trix = stream.read<VMatrix>();
+						LUA->ReferencePush( global::Matrix );
+						LUA->Call( 0, 1 ); // Get the Matrix, this should be initialized by the engine which means it will do the cleanup for us.
+						auto ptr = LUA->GetUserType<VMatrix>( -1, GarrysMod::Lua::Type::Matrix );
+						if ( ptr ) {
+							memcpy( ptr, trix, sizeof( VMatrix ) ); // This is 20x faster than writing the entire table and calling it like that.
+						}
+						break;
+					}
 				case (TYPETABLE):
 					{
 						LUA->CreateTable();										// Create table
@@ -715,6 +699,17 @@ void BinaryToTableLoopSeq( GarrysMod::Lua::ILuaBase* LUA, QuickStrRead& stream )
 
 					break;
 				}
+			case (TYPEVMATRIX):
+				{
+					VMatrix* trix = stream.read<VMatrix>();
+					LUA->ReferencePush( global::Matrix );
+					LUA->Call( 0, 1 ); // Get the Matrix
+					auto ptr = LUA->GetUserType<VMatrix>( -1, GarrysMod::Lua::Type::Matrix );
+					if ( ptr ) {
+						memcpy( ptr, trix, sizeof( VMatrix ) ); // This is 20x faster than writing the entire table and calling it like that.
+					}
+					break;
+				}
 			case (TYPETABLE):
 				{
 					LUA->CreateTable();										// Create table
@@ -746,7 +741,10 @@ LUA_FUNCTION( BinaryToTable ) {
 			uint32_t knownCRC = 0;
 			memmove( &knownCRC, str + sizeof( char ), sizeof( uint32_t ) );
 			// We need to calculate the CRC from an offset
-			uint32_t crc = crc32_sse42( str + offset, len - offset );
+			uint32_t crc = 0;
+			if ( str[ 0 ] == TYPECRC ) {								// fallback
+				crc = crc32_sb16::update( str + offset, len - offset );
+			}
 			if ( knownCRC != crc ) {
 				LUA->ThrowError("CRC does not match");
 				return 0;
@@ -773,6 +771,7 @@ LUA_FUNCTION( BinaryToTable ) {
 	return 1;												// return 1 variable to Lua
 }
 
+
 GMOD_MODULE_OPEN() {
 	LUA->PushSpecial( GarrysMod::Lua::SPECIAL_GLOB );		// Get _G
 	LUA->PushString( "TableToBinary" );						// Push name of function
@@ -783,6 +782,8 @@ GMOD_MODULE_OPEN() {
 	LUA->SetTable( -3 );									// Set variables to _G
 	LUA->GetField( -1, "tostring" );						// Get function tostring
 	global::ToStringFN = LUA->ReferenceCreate();			// Create reference to function tostring
+	LUA->GetField( -1, "Matrix" );							// Get function Matrix
+	global::Matrix = LUA->ReferenceCreate();				// Create reference to function Matrix
 	LUA->Pop();												// Pop _G
 
 	return 0;
@@ -791,6 +792,7 @@ GMOD_MODULE_OPEN() {
 
 GMOD_MODULE_CLOSE() {
 	LUA->ReferenceFree( global::ToStringFN );
+	LUA->ReferenceFree( global::Matrix );
 
 	return 0;
 }
