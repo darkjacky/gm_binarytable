@@ -42,8 +42,17 @@ jobs:
       # ----------------------------
       # Install Premake5 beta7
       # ----------------------------
+      - name: Cache Premake5
+        id: cache-premake
+        uses: actions/cache@v4
+        with:
+          path: |
+            premake5
+            premake5.exe
+          key: premake5-beta7-${{ runner.os }}
+      
       - name: Download Premake5 (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.cache-premake.outputs.cache-hit != 'true'
         run: |
           curl -L \
             https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/premake-5.0.0-beta7-linux.tar.gz \
@@ -52,7 +61,7 @@ jobs:
           chmod +x premake5
 
       - name: Download Premake5 (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.cache-premake.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           Invoke-WebRequest `
