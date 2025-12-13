@@ -27,9 +27,9 @@ project "gmsv_binarytable_32"
 
     filter "system:linux"
         optimize "Speed"
-        targetsuffix "_linux32"
+        targetsuffix "_linux" -- gmod wants _linux not _linux32
         targetextension ".dll"
-		defines { "BUILDAVX512" }
+		defines { "BUILDAVX512" } -- broken causing illegal instructions on unsupported hardware. Needs a fix.
 		buildoptions {
 			"-mavx512f",
 			"-mavx512vl",
@@ -37,7 +37,7 @@ project "gmsv_binarytable_32"
 			"-mavx512dq",
 			"-mvpclmulqdq",
 			"-mpclmul"
-		}
+		} -- Dont think this will cause any problems, perhaps it makes it faster even without enabling the AVX512 script
 
     filter { "configurations:Release", "system:windows" }
         optimize "Speed"
@@ -79,7 +79,7 @@ project "gmsv_binarytable_64"
         optimize "Speed"
         targetsuffix "_linux64"
         targetextension ".dll"
-		defines { "BUILDAVX512" }
+		--defines { "BUILDAVX512" } -- broken causing illegal instructions on unsupported hardware. Needs a fix.
 		buildoptions {
 			"-mavx512f",
 			"-mavx512vl",
@@ -87,7 +87,7 @@ project "gmsv_binarytable_64"
 			"-mavx512dq",
 			"-mvpclmulqdq",
 			"-mpclmul"
-		}
+		} -- Dont think this will cause any problems, perhaps it makes it faster even without enabling the AVX512 script
 
     filter { "configurations:Release", "system:windows" }
         optimize "Speed"
