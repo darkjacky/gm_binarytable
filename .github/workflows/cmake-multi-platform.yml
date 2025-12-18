@@ -5,40 +5,15 @@ on:
   pull_request:
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux 64-bit
-          - os: ubuntu-latest
-            arch: x86_64
-            project_suffix: "64"
-
-          # Linux 32-bit
-          - os: ubuntu-latest
-            arch: x86
-            project_suffix: "32"
-
-          # Windows 64-bit
-          - os: windows-latest
-            arch: x86_64
-            vs_platform: x64
-            project_suffix: "64"
-
-          # Windows 32-bit
-          - os: windows-latest
-            arch: x86
-            vs_platform: Win32
-            project_suffix: "32"
+  build-linux:
+    name: Build Linux (32 + 64)
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-        
+
       # ----------------------------
       # Install Premake5 beta7
       # ----------------------------
@@ -46,13 +21,11 @@ jobs:
         id: cache-premake
         uses: actions/cache@v4
         with:
-          path: |
-            premake5
-            premake5.exe
-          key: premake5-beta7-${{ runner.os }}
-      
-      - name: Download Premake5 (Linux)
-        if: runner.os == 'Linux' && steps.cache-premake.outputs.cache-hit != 'true'
+          path: premake5
+          key: premake5-beta7-linux
+
+      - name: Download Premake5
+        if: steps.cache-premake.outputs.cache-hit != 'true'
         run: |
           curl -L \
             https://github.com/premake/premake-core/releases/download/v5.0.0-beta7/premake-5.0.0-beta7-linux.tar.gz \
@@ -60,8 +33,62 @@ jobs:
           tar -xzf premake.tar.gz
           chmod +x premake5
 
-      - name: Download Premake5 (Windows)
-        if: runner.os == 'Windows' && steps.cache-premake.outputs.cache-hit != 'true'
+      # ----------------------------
+      # Linux toolchains
+      # ----------------------------
+      - name: Install 32-bit toolchain
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+
+      # ----------------------------
+      # Generate + Build
+      # ----------------------------
+      - name: Generate Makefiles
+        run: ./premake5 gmake
+
+      - name: Build all targets
+        working-directory: projects/linux
+        run: make -j$(nproc)
+
+      # ----------------------------
+      # Upload artifacts
+      # ----------------------------
+      - name: Upload Linux 32-bit
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmsv_binarytable_linux32
+          path: build/gmsv_binarytable_linux.dll
+
+      - name: Upload Linux 64-bit
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmsv_binarytable_linux64
+          path: build/gmsv_binarytable_linux64.dll
+
+
+  build-windows:
+    name: Build Windows (32 + 64)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ----------------------------
+      # Install Premake5 beta7
+      # ----------------------------
+      - name: Cache Premake5
+        id: cache-premake
+        uses: actions/cache@v4
+        with:
+          path: premake5.exe
+          key: premake5-beta7-windows
+
+      - name: Download Premake5
+        if: steps.cache-premake.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           Invoke-WebRequest `
@@ -71,59 +98,39 @@ jobs:
           Remove-Item premake.zip
 
       # ----------------------------
-      # Linux Setup
+      # Generate + Build
       # ----------------------------
-      - name: Install 32-bit toolchain (Linux)
-        if: runner.os == 'Linux' && matrix.arch == 'x86'
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib
+      - name: Generate Visual Studio solution
+        run: ./premake5.exe vs2022
 
-      # ----------------------------
-      # Generate projects
-      # ----------------------------
-      - name: Premake (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          ./premake5 gmake
-
-      - name: Premake (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ./premake5.exe vs2022
-          
-      # ----------------------------
-      # Build (Linux)
-      # ----------------------------
-      - name: Build (Linux)
-        if: runner.os == 'Linux'
-        working-directory: ./projects/linux
-        run: make -f gmsv_binarytable_${{ matrix.project_suffix }}.make
-
-
-      - name: Setup MSBuild (Windows)
-        if: runner.os == 'Windows'
+      - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
-        
-      # ----------------------------
-      # Build (Windows)
-      # ----------------------------
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
+
+      - name: Build Win32
         shell: pwsh
         run: |
-          msbuild projects/windows/gmsv_binarytable_${{ matrix.project_suffix }}.vcxproj `
+          msbuild projects/windows/gmsv_binarytable_32.vcxproj `
             /p:Configuration=Release `
-            /p:Platform=${{ matrix.vs_platform }}
+            /p:Platform=Win32
+
+      - name: Build Win64
+        shell: pwsh
+        run: |
+          msbuild projects/windows/gmsv_binarytable_64.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=x64
 
       # ----------------------------
-      # Upload compiled binaries
+      # Upload artifacts
       # ----------------------------
-      - name: Upload artifacts
+      - name: Upload Windows 32-bit
         uses: actions/upload-artifact@v4
         with:
-          name: gmsv_binarytable_${{ matrix.os == 'ubuntu-latest' && 'linux' || 'win' }}${{ matrix.project_suffix }}
-          path: build/gmsv_binarytable*.dll
-          if-no-files-found: error
+          name: gmsv_binarytable_win32
+          path: build/gmsv_binarytable_win32.dll
+
+      - name: Upload Windows 64-bit
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmsv_binarytable_win64
+          path: build/gmsv_binarytable_win64.dll
